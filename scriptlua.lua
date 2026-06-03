@@ -12,17 +12,18 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local isMobile = not UIS.KeyboardEnabled and UIS.TouchEnabled
 if isMobile then
-    local warning = Instance.new("ScreenGui")
-    warning.Name = "PlatformWarning"
-    warning.ResetOnSpawn = false
-    warning.Parent = game.CoreGui
+    local player = Players.LocalPlayer
+    local warningGui = Instance.new("ScreenGui")
+    warningGui.Name = "PlatformWarning"
+    warningGui.ResetOnSpawn = false
+    warningGui.Parent = player:WaitForChild("PlayerGui")
     local frame = Instance.new("Frame")
     frame.Size = UDim2.new(1, 0, 0.2, 0)
     frame.Position = UDim2.new(0, 0, 0.4, 0)
     frame.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
     frame.BackgroundTransparency = 0.5
     frame.BorderSizePixel = 0
-    frame.Parent = warning
+    frame.Parent = warningGui
     local label = Instance.new("TextLabel")
     label.Size = UDim2.new(1, 0, 1, 0)
     label.BackgroundTransparency = 1
@@ -34,8 +35,8 @@ if isMobile then
     label.TextScaled = true
     label.Parent = frame
     task.wait(5)
-    warning:Destroy()
-    game:GetService("Players").LocalPlayer:Kick()
+    warningGui:Destroy()
+    player:Kick()
     return
 end
 
@@ -390,6 +391,7 @@ buttons.tweenMove = createButton(containers.buttons2, "Tween Move", Color3.fromR
 buttons.fling = createButton(containers.extra, "Fling OFF", Color3.fromRGB(255,100,0), 0, 0.22)
 buttons.yStab = createButton(containers.extra, "Y-Stab OFF", Color3.fromRGB(0,200,200), 0.24, 0.22)
 buttons.fused = createButton(containers.extra, "Fused", Color3.fromRGB(0,150,0), 0.48, 0.22)
+buttons.hitbox = createButton(containers.extra, "Hitbox OFF", Color3.fromRGB(255,0,255), 0.72, 0.22)
 
 buttons.stabilize = createButton(containers.extra2, "Move Stab OFF", Color3.fromRGB(150,0,150), 0, 0.22)
 buttons.aimbot = createButton(containers.extra2, "AimBot OFF", Color3.fromRGB(150,100,0), 0.24, 0.22)
@@ -400,6 +402,7 @@ buttons.fly.TextColor3 = Color3.fromRGB(0,0,0)
 buttons.esp.TextColor3 = Color3.fromRGB(0,0,0)
 buttons.fling.TextColor3 = Color3.fromRGB(0,0,0)
 buttons.yStab.TextColor3 = Color3.fromRGB(0,0,0)
+buttons.hitbox.TextColor3 = Color3.fromRGB(255,255,255)
 buttons.stabilize.TextColor3 = Color3.fromRGB(255,255,255)
 buttons.aimbot.TextColor3 = Color3.fromRGB(255,255,255)
 buttons.puncher.TextColor3 = Color3.fromRGB(255,255,255)
@@ -410,7 +413,7 @@ local instructionLabel = Instance.new("TextLabel")
 instructionLabel.Size = UDim2.new(0.96, 0, 1, 0)
 instructionLabel.Position = UDim2.new(0.02, 0, 0.02, 0)
 instructionLabel.BackgroundTransparency = 1
-instructionLabel.Text = "Recommended speed-up method: Legit. Use Strength mode to push/pull heavy objects. If Grabber or Puncher don't working, nudge, jump, or touch the target until they activate. Y‑Stab counteracts unintended upward impulses (e.g., from high speed), keeping you grounded while running. Move‑Stab prevents rubberbanding or movement without your input. AimBot: hold RMB to snap camera to the nearest player. The Fused tab contains various scripts – some may be broken or low quality, use with caution."
+instructionLabel.Text = "Recommended speed-up method: Legit. Use Strength mode to push/pull heavy objects. If Grabber or Puncher don't working, nudge, jump, or touch the target until they activate. Y‑Stab counteracts unintended upward impulses (e.g., from high speed), keeping you grounded while running. Move‑Stab prevents rubberbanding or movement without your input. AimBot: hold RMB to snap camera to the nearest player. Hitbox: increases other players' body parts size by 5x. The Fused tab contains various scripts – some may be broken or low quality, use with caution."
 instructionLabel.TextColor3 = Color3.fromRGB(220,220,220)
 instructionLabel.Font = Enum.Font.GothamBold
 instructionLabel.TextSize = 12
@@ -454,6 +457,7 @@ local yStabEnabled = false
 local moveStabEnabled = false
 local aimbotEnabled = false
 local puncherEnabled = false
+local hitboxEnabled = false
 
 local bodyVelocity = nil
 local strengthBodyVelocity = nil
@@ -488,6 +492,8 @@ local lastUpdateStabTime = tick()
 local inputActive = false
 local tempTeleportAllowed = false
 local tempTeleportUntil = 0
+
+local originalPartSizes = {}
 
 local function isInputActive()
     return UIS:IsKeyDown(Enum.KeyCode.W) or UIS:IsKeyDown(Enum.KeyCode.S) or
@@ -1166,6 +1172,67 @@ local function createGrabberTool()
     return tool
 end
 
+local function applyHitboxToCharacter(char)
+    if not char or char == character then return end
+    for _, part in ipairs(char:GetDescendants()) do
+        if part:IsA("BasePart") then
+            if not originalPartSizes[part] then
+                originalPartSizes[part] = part.Size
+            end
+            part.Size = originalPartSizes[part] * 5
+        end
+    end
+end
+
+local function restoreHitboxFromCharacter(char)
+    if not char then return end
+    for _, part in ipairs(char:GetDescendants()) do
+        if part:IsA("BasePart") and originalPartSizes[part] then
+            part.Size = originalPartSizes[part]
+        end
+    end
+end
+
+local function toggleHitbox()
+    hitboxEnabled = not hitboxEnabled
+    setButtonActive(buttons.hitbox, hitboxEnabled)
+    buttons.hitbox.Text = hitboxEnabled and "Hitbox ON" or "Hitbox OFF"
+    
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr ~= player and plr.Character then
+            if hitboxEnabled then
+                applyHitboxToCharacter(plr.Character)
+            else
+                restoreHitboxFromCharacter(plr.Character)
+            end
+        end
+    end
+end
+
+local function onPlayerAdded(plr)
+    if plr == player then return end
+    local function onCharAdded(char)
+        if hitboxEnabled then
+            applyHitboxToCharacter(char)
+        end
+    end
+    if plr.Character then
+        onCharAdded(plr.Character)
+    end
+    plr.CharacterAdded:Connect(onCharAdded)
+end
+
+local function onPlayerRemoving(plr)
+    if plr.Character then
+        restoreHitboxFromCharacter(plr.Character)
+    end
+    for part, _ in pairs(originalPartSizes) do
+        if part and part.Parent == plr.Character then
+            originalPartSizes[part] = nil
+        end
+    end
+end
+
 local function applySpeed()
     local now = tick()
     local dt = math.min(now - lastUpdateTime, 0.1)
@@ -1564,6 +1631,8 @@ buttons.grabber.MouseButton1Click:Connect(function()
     Notify("Grabber tool added to backpack!", "Grabber", 2)
 end)
 
+buttons.hitbox.MouseButton1Click:Connect(toggleHitbox)
+
 UIS.InputBegan:Connect(function(input, processed)
     if processed or not flyEnabled then return end
     if input.KeyCode == Enum.KeyCode.W then flyControls.f = 1
@@ -1590,16 +1659,14 @@ RunService.Heartbeat:Connect(function()
     if moveStabEnabled then updateStabilization() end
 end)
 
-Players.PlayerAdded:Connect(function() if espEnabled then updateESP() end end)
-Players.PlayerRemoving:Connect(function(p)
-    if espHighlights[p] then espHighlights[p]:Destroy() espHighlights[p]=nil end
-    if espBeams[p] then
-        espBeams[p].Beam:Destroy()
-        espBeams[p].Att0:Destroy()
-        espBeams[p].Att1:Destroy()
-        espBeams[p]=nil
+for _, plr in ipairs(Players:GetPlayers()) do
+    if plr ~= player then
+        onPlayerAdded(plr)
     end
-end)
+end
+
+Players.PlayerAdded:Connect(onPlayerAdded)
+Players.PlayerRemoving:Connect(onPlayerRemoving)
 
 player.CharacterAdded:Connect(function(newChar)
     character = newChar
@@ -1641,12 +1708,14 @@ player.CharacterAdded:Connect(function(newChar)
     setButtonActive(buttons.stabilize, moveStabEnabled)
     setButtonActive(buttons.aimbot, aimbotEnabled)
     setButtonActive(buttons.puncher, puncherEnabled)
+    setButtonActive(buttons.hitbox, hitboxEnabled)
     buttons.fling.Text = "Fling OFF"
     buttons.noclip.Text = noclipEnabled and "Noclip ON" or "Noclip OFF"
     buttons.yStab.Text = yStabEnabled and "Y-Stab ON" or "Y-Stab OFF"
     buttons.stabilize.Text = moveStabEnabled and "Move Stab ON" or "Move Stab OFF"
     buttons.aimbot.Text = aimbotEnabled and "AimBot ON" or "AimBot OFF"
     buttons.puncher.Text = puncherEnabled and "Puncher ON" or "Puncher OFF"
+    buttons.hitbox.Text = hitboxEnabled and "Hitbox ON" or "Hitbox OFF"
     if espEnabled then updateESP() end
     lastUpdateTime = tick()
     lastUpdateStabTime = tick()
@@ -1672,6 +1741,15 @@ local function fullCleanup()
     if puncherEnabled then
         puncherEnabled = false
         enablePuncher()
+    end
+    if hitboxEnabled then
+        hitboxEnabled = false
+        for _, plr in ipairs(Players:GetPlayers()) do
+            if plr ~= player and plr.Character then
+                restoreHitboxFromCharacter(plr.Character)
+            end
+        end
+        originalPartSizes = {}
     end
     if fusedPanel then fusedPanel:Destroy() end
     if grabberTool then grabberTool:Destroy() end
@@ -1822,9 +1900,10 @@ local bindableButtons = {
     {btn = buttons.tweenMove, callback = function() tweenMoveEnabled = not tweenMoveEnabled setButtonActive(buttons.tweenMove, tweenMoveEnabled) if not tweenMoveEnabled then cleanupMarkers() end end, isToggle = true},
     {btn = buttons.fling, callback = function() flingEnabled = not flingEnabled setButtonActive(buttons.fling, flingEnabled) buttons.fling.Text = flingEnabled and "Fling ON" or "Fling OFF" if flingEnabled then enableFling() else disableFling() end end, isToggle = true},
     {btn = buttons.yStab, callback = function() yStabEnabled = not yStabEnabled setButtonActive(buttons.yStab, yStabEnabled) buttons.yStab.Text = yStabEnabled and "Y-Stab ON" or "Y-Stab OFF" if yStabEnabled then createYStabilizer() else destroyYStabilizer() end end, isToggle = true},
-    {btn = buttons.stabilize, callback = function() moveStabEnabled = not moveStabEnabled setButtonActive(buttons.stabilize, moveStabEnabled) buttons.stabilize.Text = moveStabEnabled and "Move Stab ON" or "Move Stab OFF" resetStabilization() end end, isToggle = true},
+    {btn = buttons.stabilize, callback = function() moveStabEnabled = not moveStabEnabled setButtonActive(buttons.stabilize, moveStabEnabled) buttons.stabilize.Text = moveStabEnabled and "Move Stab ON" or "Move Stab OFF" resetStabilization() end, isToggle = true},
     {btn = buttons.aimbot, callback = function() aimbotEnabled = not aimbotEnabled setButtonActive(buttons.aimbot, aimbotEnabled) buttons.aimbot.Text = aimbotEnabled and "AimBot ON" or "AimBot OFF" setupAimbot() end, isToggle = true},
     {btn = buttons.puncher, callback = function() puncherEnabled = not puncherEnabled setButtonActive(buttons.puncher, puncherEnabled) buttons.puncher.Text = puncherEnabled and "Puncher ON" or "Puncher OFF" enablePuncher() end, isToggle = true},
+    {btn = buttons.hitbox, callback = toggleHitbox, isToggle = true},
 }
 
 if UIS.KeyboardEnabled then
