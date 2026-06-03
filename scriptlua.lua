@@ -10,6 +10,35 @@ local CollectionService = game:GetService("CollectionService")
 local SoundService = game:GetService("SoundService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
+local isMobile = not UIS.KeyboardEnabled and UIS.TouchEnabled
+if isMobile then
+    local warning = Instance.new("ScreenGui")
+    warning.Name = "PlatformWarning"
+    warning.ResetOnSpawn = false
+    warning.Parent = game.CoreGui
+    local frame = Instance.new("Frame")
+    frame.Size = UDim2.new(1, 0, 0.2, 0)
+    frame.Position = UDim2.new(0, 0, 0.4, 0)
+    frame.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+    frame.BackgroundTransparency = 0.5
+    frame.BorderSizePixel = 0
+    frame.Parent = warning
+    local label = Instance.new("TextLabel")
+    label.Size = UDim2.new(1, 0, 1, 0)
+    label.BackgroundTransparency = 1
+    label.Font = Enum.Font.GothamBold
+    label.TextSize = 28
+    label.TextColor3 = Color3.fromRGB(255, 50, 50)
+    label.Text = "This script is designed for desktop platforms only. Please be patient—mobile support is already being worked on."
+    label.TextWrapped = true
+    label.TextScaled = true
+    label.Parent = frame
+    task.wait(5)
+    warning:Destroy()
+    game:GetService("Players").LocalPlayer:Kick()
+    return
+end
+
 local player = Players.LocalPlayer
 local character = player.Character or player.CharacterAdded:Wait()
 local humanoid = character:WaitForChild("Humanoid")
@@ -1466,6 +1495,7 @@ buttons.clickTP.MouseButton1Click:Connect(function()
     clickTPEnabled = not clickTPEnabled
     setButtonActive(buttons.clickTP, clickTPEnabled)
     if clickTPEnabled then
+        if clickTPConnection then clickTPConnection:Disconnect() end
         clickTPConnection = UIS.InputBegan:Connect(function(input, processed)
             if processed or not clickTPEnabled then return end
             if input.UserInputType == Enum.UserInputType.MouseButton1 then
@@ -1625,7 +1655,7 @@ player.CharacterAdded:Connect(function(newChar)
     if puncherEnabled then enablePuncher() end
 end)
 
-closeButton.MouseButton1Click:Connect(function()
+local function fullCleanup()
     _G.FullBrightEnabled = false
     _G.InfiniteJumpEnabled = false
     destroyAllSpeedControllers()
@@ -1644,7 +1674,36 @@ closeButton.MouseButton1Click:Connect(function()
         enablePuncher()
     end
     if fusedPanel then fusedPanel:Destroy() end
+    if grabberTool then grabberTool:Destroy() end
+    for _, conn in pairs(puncherConnections) do
+        if type(conn) == "RBXScriptConnection" then pcall(function() conn:Disconnect() end) end
+    end
+    for _, cd in pairs(puncherParts) do
+        pcall(function() cd:Destroy() end)
+    end
+    puncherParts = {}
+    puncherConnections = {}
+    for _, data in pairs(espBeams) do
+        pcall(function()
+            data.Beam:Destroy()
+            data.Att0:Destroy()
+            data.Att1:Destroy()
+        end)
+    end
+    espBeams = {}
+    for _, hl in pairs(espHighlights) do
+        pcall(function() hl:Destroy() end)
+    end
+    espHighlights = {}
     gui:Destroy()
+end
+
+closeButton.MouseButton1Click:Connect(function()
+    fullCleanup()
+    for _, conn in pairs(_G.connections or {}) do pcall(function() conn:Disconnect() end) end
+    _G.connections = nil
+    game:GetService("CoreGui"):FindFirstChild("ControlGUI"):Destroy()
+    script:Destroy()
 end)
 
 updateAllSliders()
@@ -1653,6 +1712,135 @@ updateTextSizes()
 UIS.InputBegan:Connect(function(input)
     if input.KeyCode == Enum.KeyCode.RightShift then
         gui.Enabled = not gui.Enabled
+    end
+end)
+
+local keyBinds = {}
+
+local function addBindButton(parentBtn, callback, isToggle)
+    local bindBtn = Instance.new("TextButton")
+    bindBtn.Size = UDim2.new(0, 20, 1, -4)
+    bindBtn.Position = UDim2.new(1, -24, 0, 2)
+    bindBtn.BackgroundColor3 = Color3.fromRGB(80,80,80)
+    bindBtn.BackgroundTransparency = 0.2
+    bindBtn.BorderSizePixel = 0
+    bindBtn.Font = Enum.Font.GothamBold
+    bindBtn.TextSize = 11
+    bindBtn.TextColor3 = Color3.fromRGB(255,255,255)
+    bindBtn.Text = "?"
+    bindBtn.Parent = parentBtn
+    local bc = Instance.new("UICorner")
+    bc.CornerRadius = UDim.new(0.2,0)
+    bc.Parent = bindBtn
+    
+    local currentKey = nil
+    local timeoutThread = nil
+    
+    local function clearTimeout()
+        if timeoutThread then
+            task.cancel(timeoutThread)
+            timeoutThread = nil
+        end
+    end
+    
+    local function startTimeout()
+        clearTimeout()
+        timeoutThread = task.spawn(function()
+            task.wait(3)
+            if currentKey then
+                keyBinds[currentKey] = nil
+                currentKey = nil
+                bindBtn.Text = "?"
+                Notify("Binding cancelled: no key pressed", "Bind", 2)
+            end
+            timeoutThread = nil
+        end)
+    end
+    
+    local function updateBindDisplay()
+        if currentKey then
+            local keyName = tostring(currentKey):gsub("Enum.KeyCode.", "")
+            if #keyName > 3 then keyName = keyName:sub(1,3) end
+            bindBtn.Text = keyName
+        else
+            bindBtn.Text = "?"
+        end
+    end
+    
+    bindBtn.MouseButton1Click:Connect(function()
+        if currentKey then
+            keyBinds[currentKey] = nil
+            currentKey = nil
+            updateBindDisplay()
+            Notify("Binding removed", "Bind", 1)
+            return
+        end
+        
+        local originalText = bindBtn.Text
+        bindBtn.Text = "..."
+        clearTimeout()
+        local conn
+        conn = UIS.InputBegan:Connect(function(input, processed)
+            if processed then return end
+            if input.UserInputType == Enum.UserInputType.Keyboard then
+                local key = input.KeyCode
+                if key ~= Enum.KeyCode.Unknown then
+                    if currentKey then
+                        keyBinds[currentKey] = nil
+                    end
+                    currentKey = key
+                    keyBinds[key] = {callback = callback, isToggle = isToggle}
+                    updateBindDisplay()
+                    Notify("Bound to " .. tostring(key):gsub("Enum.KeyCode.", ""), "Bind", 2)
+                end
+                conn:Disconnect()
+                clearTimeout()
+            end
+        end)
+        startTimeout()
+        task.delay(3, function()
+            if conn and conn.Connected then
+                conn:Disconnect()
+                if bindBtn.Text == "..." then
+                    bindBtn.Text = originalText
+                    clearTimeout()
+                end
+            end
+        end)
+    end)
+    
+    return bindBtn, function() return currentKey end
+end
+
+local bindableButtons = {
+    {btn = buttons.fullbright, callback = function() _G.FullBrightEnabled = not _G.FullBrightEnabled setButtonActive(buttons.fullbright, _G.FullBrightEnabled) end, isToggle = true},
+    {btn = buttons.infJump, callback = function() _G.InfiniteJumpEnabled = not _G.InfiniteJumpEnabled setButtonActive(buttons.infJump, _G.InfiniteJumpEnabled) end, isToggle = true},
+    {btn = buttons.noclip, callback = function() setNoclip(not noclipEnabled) setButtonActive(buttons.noclip, noclipEnabled) buttons.noclip.Text = noclipEnabled and "Noclip ON" or "Noclip OFF" end, isToggle = true},
+    {btn = buttons.fly, callback = function() flyEnabled = not flyEnabled setButtonActive(buttons.fly, flyEnabled) if flyEnabled then destroyAllSpeedControllers() humanoid.WalkSpeed = BASE_WALK_SPEED if hrp then hrp.Velocity = Vector3.new(0, hrp.Velocity.Y, 0) end flyBodyGyro = Instance.new("BodyGyro") flyBodyGyro.P = 9e4 flyBodyGyro.MaxTorque = Vector3.new(9e9,9e9,9e9) flyBodyGyro.CFrame = hrp.CFrame flyBodyGyro.Parent = hrp flyBodyVelocity = Instance.new("BodyVelocity") flyBodyVelocity.Velocity = Vector3.new(0,0,0) flyBodyVelocity.MaxForce = Vector3.new(9e9,9e9,9e9) flyBodyVelocity.Parent = hrp humanoid.PlatformStand = true resetStabilization() else disableFlyEXVS() end end, isToggle = true},
+    {btn = buttons.esp, callback = function() espEnabled = not espEnabled setButtonActive(buttons.esp, espEnabled) buttons.esp.Text = espEnabled and "ESP ON" or "ESP OFF" if espEnabled then updateESP() else cleanupESP() end end, isToggle = true},
+    {btn = buttons.clickTP, callback = function() clickTPEnabled = not clickTPEnabled setButtonActive(buttons.clickTP, clickTPEnabled) if clickTPEnabled then if clickTPConnection then clickTPConnection:Disconnect() end clickTPConnection = UIS.InputBegan:Connect(function(input, processed) if processed or not clickTPEnabled then return end if input.UserInputType == Enum.UserInputType.MouseButton1 then local target = Mouse.Hit.Position if hrp then hrp.CFrame = CFrame.new(target + Vector3.new(0,3,0)) allowTempTeleport(0.5) resetStabilization() end end end) else if clickTPConnection then clickTPConnection:Disconnect() clickTPConnection = nil end end end, isToggle = true},
+    {btn = buttons.tweenMove, callback = function() tweenMoveEnabled = not tweenMoveEnabled setButtonActive(buttons.tweenMove, tweenMoveEnabled) if not tweenMoveEnabled then cleanupMarkers() end end, isToggle = true},
+    {btn = buttons.fling, callback = function() flingEnabled = not flingEnabled setButtonActive(buttons.fling, flingEnabled) buttons.fling.Text = flingEnabled and "Fling ON" or "Fling OFF" if flingEnabled then enableFling() else disableFling() end end, isToggle = true},
+    {btn = buttons.yStab, callback = function() yStabEnabled = not yStabEnabled setButtonActive(buttons.yStab, yStabEnabled) buttons.yStab.Text = yStabEnabled and "Y-Stab ON" or "Y-Stab OFF" if yStabEnabled then createYStabilizer() else destroyYStabilizer() end end, isToggle = true},
+    {btn = buttons.stabilize, callback = function() moveStabEnabled = not moveStabEnabled setButtonActive(buttons.stabilize, moveStabEnabled) buttons.stabilize.Text = moveStabEnabled and "Move Stab ON" or "Move Stab OFF" resetStabilization() end end, isToggle = true},
+    {btn = buttons.aimbot, callback = function() aimbotEnabled = not aimbotEnabled setButtonActive(buttons.aimbot, aimbotEnabled) buttons.aimbot.Text = aimbotEnabled and "AimBot ON" or "AimBot OFF" setupAimbot() end, isToggle = true},
+    {btn = buttons.puncher, callback = function() puncherEnabled = not puncherEnabled setButtonActive(buttons.puncher, puncherEnabled) buttons.puncher.Text = puncherEnabled and "Puncher ON" or "Puncher OFF" enablePuncher() end, isToggle = true},
+}
+
+if UIS.KeyboardEnabled then
+    for _, data in ipairs(bindableButtons) do
+        addBindButton(data.btn, data.callback, data.isToggle)
+    end
+end
+
+UIS.InputBegan:Connect(function(input, processed)
+    if processed then return end
+    if input.UserInputType == Enum.UserInputType.Keyboard then
+        local key = input.KeyCode
+        local bind = keyBinds[key]
+        if bind then
+            bind.callback()
+        end
     end
 end)
 
