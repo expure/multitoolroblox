@@ -603,7 +603,7 @@ local function refreshDropdown()
     end
     for i, wp in ipairs(waypoints) do
         local item = Instance.new("Frame")
-        item.Size = UDim2.new(1, -8, 0, 28)
+        item.Size = UDim2.new(1, -8, 0, 30)
         item.BackgroundColor3 = Color3.fromRGB(40,40,50)
         item.BackgroundTransparency = 0.2
         item.BorderSizePixel = 0
@@ -623,6 +623,7 @@ local function refreshDropdown()
         label.TextColor3 = Color3.new(1,1,1)
         label.Text = wp.name
         label.TextXAlignment = Enum.TextXAlignment.Left
+        label.ZIndex = 153
         label.Parent = item
 
         local teleportBtn = Instance.new("TextButton")
@@ -635,6 +636,7 @@ local function refreshDropdown()
         teleportBtn.TextSize = 11
         teleportBtn.TextColor3 = Color3.new(1,1,1)
         teleportBtn.Text = "TP"
+        teleportBtn.ZIndex = 153
         teleportBtn.Parent = item
         local tpCorner = Instance.new("UICorner")
         tpCorner.CornerRadius = UDim.new(0.2, 0)
@@ -653,6 +655,7 @@ local function refreshDropdown()
         deleteBtn.TextSize = 11
         deleteBtn.TextColor3 = Color3.new(1,1,1)
         deleteBtn.Text = "X"
+        deleteBtn.ZIndex = 153
         deleteBtn.Parent = item
         local delCorner = Instance.new("UICorner")
         delCorner.CornerRadius = UDim.new(0.2, 0)
@@ -663,6 +666,7 @@ local function refreshDropdown()
     end
     local layout = scroll:FindFirstChildOfClass("UIListLayout")
     if layout then
+        task.wait()
         scroll.CanvasSize = UDim2.new(0, 0, 0, layout.AbsoluteContentSize.Y + 8)
     end
 end
@@ -852,15 +856,14 @@ end
 local function updateYStabilizer()
     if not yStabEnabled or not yStabilizerForce then return end
     if not hrp then return end
-    local state = humanoid:GetState()
     local isGrounded = (humanoid.FloorMaterial ~= Enum.Material.Air)
-    if not isGrounded and state ~= Enum.HumanoidStateType.Jumping and state ~= Enum.HumanoidStateType.Freefall then
+    if not isGrounded then
         local vy = hrp.Velocity.Y
-        local forceMagnitude = -vy * 8000
+        local forceMagnitude = -vy * 15000
         if vy > 0 then
-            forceMagnitude = forceMagnitude * (1 + math.min(math.abs(vy) * 0.15, 3))
+            forceMagnitude = forceMagnitude * (1 + math.min(math.abs(vy) * 0.3, 5))
         end
-        forceMagnitude = math.clamp(forceMagnitude, -80000, 80000)
+        forceMagnitude = math.clamp(forceMagnitude, -120000, 120000)
         yStabilizerForce.Force = Vector3.new(0, forceMagnitude, 0)
     else
         yStabilizerForce.Force = Vector3.new(0, 0, 0)
