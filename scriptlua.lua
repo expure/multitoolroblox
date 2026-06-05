@@ -1,7 +1,3 @@
--- ==============================================
--- EXVS ► Multi Tool (исправленная версия)
--- ==============================================
-
 local Players = game:GetService("Players")
 local Lighting = game:GetService("Lighting")
 local UIS = game:GetService("UserInputService")
@@ -423,7 +419,7 @@ local instructionLabel = Instance.new("TextLabel")
 instructionLabel.Size = UDim2.new(0.96, 0, 1, 0)
 instructionLabel.Position = UDim2.new(0.02, 0, 0.02, 0)
 instructionLabel.BackgroundTransparency = 1
-instructionLabel.Text = "Recommended speed-up method: Legit. Use Strength mode to push/pull heavy objects. If Grabber or Puncher don't working, nudge, jump, or touch the target until they activate. Y‑Stab counteracts unintended upward impulses (e.g., from high speed), keeping you grounded while running. Move‑Stab prevents rubberbanding and also anchors you when idle — it works ONLY with Tween and CFrame speed methods. AimBot: hold RMB to snap camera to the nearest player. Hitbox: increases other players' body parts size by 5x. The Fused tab contains various scripts – some may be broken or low quality, use with caution."
+instructionLabel.Text = "Recommended speed-up method: Legit. Use Strength mode to push/pull heavy objects. If Grabber or Puncher don't working, nudge, jump, or touch the target until they activate. Y‑Stab counteracts unintended upward impulses (e.g., from high speed), keeping you grounded while running. Move‑Stab: when Speed Method is CFrame or Tween, it anchors you when idle; otherwise it only prevents rubberbanding. AimBot: hold RMB to snap camera to the nearest player. Hitbox: increases other players' body parts size by 5x. The Fused tab contains various scripts – some may be broken or low quality, use with caution."
 instructionLabel.TextColor3 = Color3.fromRGB(220,220,220)
 instructionLabel.Font = Enum.Font.GothamBold
 instructionLabel.TextSize = 12
@@ -506,49 +502,46 @@ local anchorBodyPosition = nil
 
 local originalPartSizes = {}
 
--- Waypoints system
 local waypoints = {}
-local nextWaypointId = 0
-local wpMenuGui = nil
+local wpDropdown = nil
 
-local function refreshWaypointMenu()
-    if not wpMenuGui then return end
-    local listFrame = wpMenuGui:FindFirstChild("ListFrame")
-    if not listFrame then return end
+local function refreshWaypointDropdown()
+    if not wpDropdown or not wpDropdown:FindFirstChild("ListFrame") then return end
+    local listFrame = wpDropdown:FindFirstChild("ListFrame")
     for _, child in ipairs(listFrame:GetChildren()) do
         if child:IsA("Frame") then child:Destroy() end
     end
     local layout = listFrame:FindFirstChildOfClass("UIListLayout")
     if not layout then
         layout = Instance.new("UIListLayout")
-        layout.Padding = UDim.new(0, 4)
+        layout.Padding = UDim.new(0, 2)
         layout.SortOrder = Enum.SortOrder.LayoutOrder
         layout.Parent = listFrame
     end
     for id, pos in pairs(waypoints) do
         local entry = Instance.new("Frame")
-        entry.Size = UDim2.new(1, -16, 0, 30)
-        entry.BackgroundColor3 = Color3.fromRGB(30,30,40)
+        entry.Size = UDim2.new(1, -8, 0, 24)
+        entry.BackgroundColor3 = Color3.fromRGB(40,40,50)
         entry.BorderSizePixel = 0
         entry.Parent = listFrame
         local label = Instance.new("TextLabel")
-        label.Size = UDim2.new(0.6, 0, 1, 0)
+        label.Size = UDim2.new(0.5, 0, 1, 0)
         label.Position = UDim2.new(0, 4, 0, 0)
         label.BackgroundTransparency = 1
         label.Text = string.format("way-%03d", id)
         label.TextColor3 = Color3.fromRGB(255,255,255)
         label.Font = Enum.Font.Gotham
-        label.TextSize = 14
+        label.TextSize = 12
         label.TextXAlignment = Enum.TextXAlignment.Left
         label.Parent = entry
         local tpBtn = Instance.new("TextButton")
-        tpBtn.Size = UDim2.new(0, 60, 1, -4)
-        tpBtn.Position = UDim2.new(0.6, 0, 0, 2)
+        tpBtn.Size = UDim2.new(0, 50, 1, -2)
+        tpBtn.Position = UDim2.new(0.5, 0, 0, 1)
         tpBtn.Text = "TP"
         tpBtn.BackgroundColor3 = Color3.fromRGB(0,150,0)
         tpBtn.TextColor3 = Color3.fromRGB(255,255,255)
         tpBtn.Font = Enum.Font.GothamBold
-        tpBtn.TextSize = 12
+        tpBtn.TextSize = 11
         tpBtn.Parent = entry
         tpBtn.MouseButton1Click:Connect(function()
             if hrp then
@@ -556,89 +549,103 @@ local function refreshWaypointMenu()
                 allowTempTeleport(0.5)
                 resetStabilization()
             end
+            wpDropdown.Visible = false
         end)
         local delBtn = Instance.new("TextButton")
-        delBtn.Size = UDim2.new(0, 50, 1, -4)
-        delBtn.Position = UDim2.new(0.8, 0, 0, 2)
+        delBtn.Size = UDim2.new(0, 40, 1, -2)
+        delBtn.Position = UDim2.new(0.75, 0, 0, 1)
         delBtn.Text = "Del"
         delBtn.BackgroundColor3 = Color3.fromRGB(150,0,0)
         delBtn.TextColor3 = Color3.fromRGB(255,255,255)
         delBtn.Font = Enum.Font.GothamBold
-        delBtn.TextSize = 12
+        delBtn.TextSize = 11
         delBtn.Parent = entry
         delBtn.MouseButton1Click:Connect(function()
             waypoints[id] = nil
-            refreshWaypointMenu()
-            Notify(string.format("Waypoint way-%03d deleted", id), "Waypoint", 2)
+            refreshWaypointDropdown()
+            Notify(string.format("Deleted waypoint way-%03d", id), "Waypoint", 2)
         end)
         local corner = Instance.new("UICorner")
         corner.CornerRadius = UDim.new(0.2,0)
         corner.Parent = entry
     end
-    listFrame.CanvasSize = UDim2.new(0,0,0, layout.AbsoluteContentSize.Y + 8)
+    listFrame.CanvasSize = UDim2.new(0,0,0, layout.AbsoluteContentSize.Y + 4)
 end
 
-local function createWaypointMenu()
-    if wpMenuGui then
-        wpMenuGui:Destroy()
-        wpMenuGui = nil
+local function createWaypointDropdown()
+    if wpDropdown then
+        wpDropdown.Visible = not wpDropdown.Visible
         return
     end
-    wpMenuGui = Instance.new("ScreenGui")
-    wpMenuGui.Name = "WaypointMenu"
-    wpMenuGui.ResetOnSpawn = false
-    wpMenuGui.Parent = gui
-    local mainFrame = Instance.new("Frame")
-    mainFrame.Size = UDim2.new(0, 300, 0, 400)
-    mainFrame.Position = UDim2.new(0.5, -150, 0.5, -200)
-    mainFrame.BackgroundColor3 = Color3.fromRGB(20,20,30)
-    mainFrame.BackgroundTransparency = 0.2
-    mainFrame.BorderSizePixel = 0
-    mainFrame.Parent = wpMenuGui
+    wpDropdown = Instance.new("Frame")
+    wpDropdown.Name = "WPDropdown"
+    wpDropdown.Size = UDim2.new(0, 200, 0, 200)
+    wpDropdown.Position = UDim2.new(buttons.wpList.AbsolutePosition.X.Scale, buttons.wpList.AbsolutePosition.Y.Offset + 30, 0, 0)
+    wpDropdown.BackgroundColor3 = Color3.fromRGB(25,25,35)
+    wpDropdown.BackgroundTransparency = 0.1
+    wpDropdown.BorderSizePixel = 0
+    wpDropdown.Visible = true
+    wpDropdown.ZIndex = 200
+    wpDropdown.Parent = gui
     local corner = Instance.new("UICorner")
     corner.CornerRadius = UDim.new(0.02,0)
-    corner.Parent = mainFrame
+    corner.Parent = wpDropdown
+    local stroke = Instance.new("UIStroke")
+    stroke.Color = Color3.fromRGB(100,100,150)
+    stroke.Thickness = 1
+    stroke.Transparency = 0.5
+    stroke.Parent = wpDropdown
     local titleBar = Instance.new("Frame")
-    titleBar.Size = UDim2.new(1,0,0,30)
-    titleBar.BackgroundColor3 = Color3.fromRGB(0,60,0)
-    titleBar.BorderSizePixel = 0
-    titleBar.Parent = mainFrame
+    titleBar.Size = UDim2.new(1,0,0,24)
+    titleBar.BackgroundColor3 = Color3.fromRGB(0,80,0)
+    titleBar.Parent = wpDropdown
     local titleLabel = Instance.new("TextLabel")
-    titleLabel.Size = UDim2.new(1, -30, 1, 0)
+    titleLabel.Size = UDim2.new(1, -24, 1, 0)
     titleLabel.Position = UDim2.new(0, 4, 0, 0)
     titleLabel.Text = "Waypoints"
     titleLabel.TextColor3 = Color3.fromRGB(255,255,255)
     titleLabel.Font = Enum.Font.GothamBold
-    titleLabel.TextSize = 16
+    titleLabel.TextSize = 14
     titleLabel.BackgroundTransparency = 1
     titleLabel.Parent = titleBar
     local closeBtn = Instance.new("TextButton")
-    closeBtn.Size = UDim2.new(0, 30, 1, 0)
-    closeBtn.Position = UDim2.new(1, -30, 0, 0)
+    closeBtn.Size = UDim2.new(0, 20, 1, 0)
+    closeBtn.Position = UDim2.new(1, -20, 0, 0)
     closeBtn.Text = "X"
-    closeBtn.BackgroundColor3 = Color3.fromRGB(200,60,60)
+    closeBtn.BackgroundColor3 = Color3.fromRGB(150,30,30)
     closeBtn.TextColor3 = Color3.fromRGB(255,255,255)
     closeBtn.Font = Enum.Font.GothamBold
-    closeBtn.TextSize = 14
-    closeBtn.AutoButtonColor = false
+    closeBtn.TextSize = 12
     closeBtn.Parent = titleBar
     closeBtn.MouseButton1Click:Connect(function()
-        wpMenuGui:Destroy()
-        wpMenuGui = nil
+        wpDropdown.Visible = false
     end)
     local listFrame = Instance.new("ScrollingFrame")
     listFrame.Name = "ListFrame"
-    listFrame.Size = UDim2.new(1, -8, 1, -38)
-    listFrame.Position = UDim2.new(0, 4, 0, 34)
+    listFrame.Size = UDim2.new(1, -4, 1, -28)
+    listFrame.Position = UDim2.new(0, 2, 0, 26)
     listFrame.BackgroundTransparency = 1
     listFrame.CanvasSize = UDim2.new(0,0,0,0)
-    listFrame.ScrollBarThickness = 6
-    listFrame.Parent = mainFrame
+    listFrame.ScrollBarThickness = 4
+    listFrame.Parent = wpDropdown
     local layout = Instance.new("UIListLayout")
-    layout.Padding = UDim.new(0, 4)
+    layout.Padding = UDim.new(0, 2)
     layout.SortOrder = Enum.SortOrder.LayoutOrder
     layout.Parent = listFrame
-    refreshWaypointMenu()
+    refreshWaypointDropdown()
+    local function closeOnClickOutside(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            local pos = input.Position
+            local absPos = wpDropdown.AbsolutePosition
+            local size = wpDropdown.AbsoluteSize
+            if not (pos.X >= absPos.X and pos.X <= absPos.X + size.X and pos.Y >= absPos.Y and pos.Y <= absPos.Y + size.Y) then
+                wpDropdown.Visible = false
+                UIS.InputBegan:Disconnect(closeConn)
+            end
+        end
+    end
+    local closeConn
+    closeConn = UIS.InputBegan:Connect(closeOnClickOutside)
 end
 
 local function saveWaypoint()
@@ -660,10 +667,9 @@ local function saveWaypoint()
     end
     waypoints[id] = pos
     Notify(string.format("Saved waypoint way-%03d at position (%.1f, %.1f, %.1f)", id, pos.X, pos.Y, pos.Z), "Waypoint", 3)
-    if wpMenuGui then refreshWaypointMenu() end
+    if wpDropdown and wpDropdown.Visible then refreshWaypointDropdown() end
 end
 
--- Move Stab anchor and input detection
 local function isInputActive()
     return UIS:IsKeyDown(Enum.KeyCode.W) or UIS:IsKeyDown(Enum.KeyCode.S) or
            UIS:IsKeyDown(Enum.KeyCode.A) or UIS:IsKeyDown(Enum.KeyCode.D)
@@ -674,16 +680,23 @@ local function updateMoveStabAnchor()
         if anchorBodyPosition then anchorBodyPosition:Destroy() anchorBodyPosition = nil end
         return
     end
-    local moving = isInputActive()
-    if not moving and hrp and not flyEnabled then
-        if not anchorBodyPosition then
-            anchorBodyPosition = Instance.new("BodyPosition")
-            anchorBodyPosition.MaxForce = Vector3.new(1e9, 1e9, 1e9)
-            anchorBodyPosition.P = 5000
-            anchorBodyPosition.D = 1000
-            anchorBodyPosition.Parent = hrp
+    if speedMethod == "CFrame" or speedMethod == "Tween" then
+        local moving = isInputActive()
+        if not moving and hrp and not flyEnabled then
+            if not anchorBodyPosition then
+                anchorBodyPosition = Instance.new("BodyPosition")
+                anchorBodyPosition.MaxForce = Vector3.new(1e9, 1e9, 1e9)
+                anchorBodyPosition.P = 5000
+                anchorBodyPosition.D = 1000
+                anchorBodyPosition.Parent = hrp
+            end
+            anchorBodyPosition.Position = hrp.Position
+        else
+            if anchorBodyPosition then
+                anchorBodyPosition:Destroy()
+                anchorBodyPosition = nil
+            end
         end
-        anchorBodyPosition.Position = hrp.Position
     else
         if anchorBodyPosition then
             anchorBodyPosition:Destroy()
@@ -692,7 +705,37 @@ local function updateMoveStabAnchor()
     end
 end
 
--- Y Stabilizer (adaptive, stronger)
+local function disableFlyEXVS()
+    if flyBodyGyro then flyBodyGyro:Destroy() end
+    if flyBodyVelocity then flyBodyVelocity:Destroy() end
+    humanoid.PlatformStand = false
+    flyControls = {f=0,b=0,l=0,r=0}
+    currentFlySpeed = 0
+end
+
+local function toggleFly()
+    flyEnabled = not flyEnabled
+    setButtonActive(buttons.fly, flyEnabled)
+    if flyEnabled then
+        destroyAllSpeedControllers()
+        humanoid.WalkSpeed = BASE_WALK_SPEED
+        if hrp then hrp.Velocity = Vector3.new(0, hrp.Velocity.Y, 0) end
+        flyBodyGyro = Instance.new("BodyGyro")
+        flyBodyGyro.P = 9e4
+        flyBodyGyro.MaxTorque = Vector3.new(9e9,9e9,9e9)
+        flyBodyGyro.CFrame = hrp.CFrame
+        flyBodyGyro.Parent = hrp
+        flyBodyVelocity = Instance.new("BodyVelocity")
+        flyBodyVelocity.Velocity = Vector3.new(0,0,0)
+        flyBodyVelocity.MaxForce = Vector3.new(9e9,9e9,9e9)
+        flyBodyVelocity.Parent = hrp
+        humanoid.PlatformStand = true
+        resetStabilization()
+    else
+        disableFlyEXVS()
+    end
+end
+
 local function createYStabilizer()
     if yStabilizerForce then yStabilizerForce:Destroy() end
     if yStabilizerAttachment then yStabilizerAttachment:Destroy() end
@@ -730,39 +773,6 @@ local function destroyYStabilizer()
     if yStabilizerAttachment then yStabilizerAttachment:Destroy() yStabilizerAttachment = nil end
 end
 
--- Fly logic (original, no seat modification)
-local function disableFlyEXVS()
-    if flyBodyGyro then flyBodyGyro:Destroy() end
-    if flyBodyVelocity then flyBodyVelocity:Destroy() end
-    humanoid.PlatformStand = false
-    flyControls = {f=0,b=0,l=0,r=0}
-    currentFlySpeed = 0
-end
-
-local function toggleFly()
-    flyEnabled = not flyEnabled
-    setButtonActive(buttons.fly, flyEnabled)
-    if flyEnabled then
-        destroyAllSpeedControllers()
-        humanoid.WalkSpeed = BASE_WALK_SPEED
-        if hrp then hrp.Velocity = Vector3.new(0, hrp.Velocity.Y, 0) end
-        flyBodyGyro = Instance.new("BodyGyro")
-        flyBodyGyro.P = 9e4
-        flyBodyGyro.MaxTorque = Vector3.new(9e9,9e9,9e9)
-        flyBodyGyro.CFrame = hrp.CFrame
-        flyBodyGyro.Parent = hrp
-        flyBodyVelocity = Instance.new("BodyVelocity")
-        flyBodyVelocity.Velocity = Vector3.new(0,0,0)
-        flyBodyVelocity.MaxForce = Vector3.new(9e9,9e9,9e9)
-        flyBodyVelocity.Parent = hrp
-        humanoid.PlatformStand = true
-        resetStabilization()
-    else
-        disableFlyEXVS()
-    end
-end
-
--- Rest of functions (same as before, but with corrected order)
 local function updateStabilization()
     if not moveStabEnabled then return end
     if not hrp or not hrp.Parent then return end
@@ -1453,7 +1463,6 @@ local function onPlayerRemoving(plr)
     end
 end
 
--- Main speed application
 local function applySpeed()
     local now = tick()
     local dt = math.min(now - lastUpdateTime, 0.1)
@@ -1841,7 +1850,7 @@ end)
 buttons.hitbox.MouseButton1Click:Connect(toggleHitbox)
 
 buttons.saveWP.MouseButton1Click:Connect(saveWaypoint)
-buttons.wpList.MouseButton1Click:Connect(createWaypointMenu)
+buttons.wpList.MouseButton1Click:Connect(createWaypointDropdown)
 
 UIS.InputBegan:Connect(function(input, processed)
     if processed or not flyEnabled then return end
@@ -1965,7 +1974,7 @@ local function fullCleanup()
     if anchorBodyPosition then anchorBodyPosition:Destroy() end
     if fusedPanel then fusedPanel:Destroy() end
     if grabberTool then grabberTool:Destroy() end
-    if wpMenuGui then wpMenuGui:Destroy() end
+    if wpDropdown then wpDropdown:Destroy() end
     for _, conn in pairs(puncherConnections) do
         if type(conn) == "RBXScriptConnection" then pcall(function() conn:Disconnect() end) end
     end
