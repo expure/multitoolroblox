@@ -419,7 +419,7 @@ local instructionLabel = Instance.new("TextLabel")
 instructionLabel.Size = UDim2.new(0.96, 0, 1, 0)
 instructionLabel.Position = UDim2.new(0.02, 0, 0.02, 0)
 instructionLabel.BackgroundTransparency = 1
-instructionLabel.Text = "Recommended speed-up method: Legit. Use Strength mode to push/pull heavy objects. If Grabber or Puncher don't working, nudge, jump, or touch the target until they activate. Y‑Stab counteracts unintended upward impulses (adaptive force, disabled when grounded). Move‑Stab prevents rubberbanding or movement without your input (works with any speed mode). AimBot: hold RMB to snap camera to the nearest player. Hitbox: increases other players' body parts size by 5x. The Fused tab contains various scripts – some may be broken or low quality, use with caution."
+instructionLabel.Text = "Recommended speed-up method: Legit. Use Strength mode to push/pull heavy objects. If Grabber or Puncher don't working, nudge, jump, or touch the target until they activate. Y‑Stab counteracts unintended upward impulses (adaptive force, disabled when grounded). Move‑Stab prevents rubberbanding or movement without your input (works with any speed mode). AimBot: hold RMB to snap camera to the nearest player. Hitbox: increases other players' body parts size by 5x. Waypoints: TP = instant teleport, BP = smooth pull (BodyPosition/Tween), X = delete. The Fused tab contains various scripts – some may be broken or low quality, use with caution."
 instructionLabel.TextColor3 = Color3.fromRGB(220,220,220)
 instructionLabel.Font = Enum.Font.GothamBold
 instructionLabel.TextSize = 12
@@ -516,42 +516,63 @@ local function updateWaypointCounter()
     waypointCounter = maxNum
 end
 
+local function smoothTeleportToWaypoint(pos)
+    if not hrp then return end
+    if speedMethod == "Tween" or speedMethod == "CFrame" then
+        if activeTween then activeTween:Cancel() end
+        local dist = (pos - hrp.Position).Magnitude
+        local dur = dist / (BASE_WALK_SPEED * currentSpeedMult * 2)
+        activeTween = TweenService:Create(hrp, TweenInfo.new(dur, Enum.EasingStyle.Linear), {CFrame = CFrame.new(pos + Vector3.new(0,3,0))})
+        activeTween:Play()
+        activeTween.Completed:Connect(function() activeTween = nil end)
+        allowTempTeleport(dur + 0.5)
+    else
+        local bodyPos = Instance.new("BodyPosition")
+        bodyPos.Position = pos + Vector3.new(0,3,0)
+        bodyPos.MaxForce = Vector3.new(1e9, 1e9, 1e9)
+        bodyPos.P = 2000
+        bodyPos.D = 500
+        bodyPos.Parent = hrp
+        Debris:AddItem(bodyPos, 1)
+        local bodyGyro = Instance.new("BodyGyro")
+        bodyGyro.MaxTorque = Vector3.new(1e9, 1e9, 1e9)
+        bodyGyro.P = 2000
+        bodyGyro.D = 500
+        bodyGyro.CFrame = CFrame.new(hrp.Position, pos)
+        bodyGyro.Parent = hrp
+        Debris:AddItem(bodyGyro, 1)
+        task.delay(1, function()
+            if hrp then
+                hrp.CFrame = CFrame.new(pos + Vector3.new(0,3,0))
+            end
+        end)
+        allowTempTeleport(1.2)
+    end
+    resetStabilization()
+end
+
+local function instantTeleportToWaypoint(pos)
+    if hrp then
+        hrp.CFrame = CFrame.new(pos + Vector3.new(0,3,0))
+        allowTempTeleport(0.5)
+        resetStabilization()
+    end
+end
+
 local function saveWaypoint()
     if not hrp then return end
     waypointCounter = waypointCounter + 1
     local name = formatWaypointNumber(waypointCounter)
     table.insert(waypoints, {name = name, position = hrp.Position})
     Notify("Waypoint saved: " .. name, "Waypoints", 2)
-    if dropdownFrame and dropdownFrame.Visible then
-        refreshDropdown()
-    end
-end
-
-local function teleportToWaypoint(pos)
-    if hrp then
-        if speedMethod == "Tween" or speedMethod == "CFrame" then
-            if activeTween then activeTween:Cancel() end
-            local dist = (pos - hrp.Position).Magnitude
-            local dur = dist / (BASE_WALK_SPEED * currentSpeedMult * 2)
-            activeTween = TweenService:Create(hrp, TweenInfo.new(dur, Enum.EasingStyle.Linear), {CFrame = CFrame.new(pos + Vector3.new(0,3,0))})
-            activeTween:Play()
-            activeTween.Completed:Connect(function() activeTween = nil end)
-            allowTempTeleport(dur + 0.5)
-        else
-            hrp.CFrame = CFrame.new(pos + Vector3.new(0,3,0))
-            allowTempTeleport(0.5)
-        end
-        resetStabilization()
-    end
+    refreshDropdown()
 end
 
 local function deleteWaypoint(index)
     table.remove(waypoints, index)
     updateWaypointCounter()
     Notify("Waypoint deleted", "Waypoints", 2)
-    if dropdownFrame and dropdownFrame.Visible then
-        refreshDropdown()
-    end
+    refreshDropdown()
 end
 
 local dropdownFrame = nil
@@ -559,7 +580,7 @@ local function createDropdown()
     if dropdownFrame then dropdownFrame:Destroy() end
     dropdownFrame = Instance.new("Frame")
     dropdownFrame.Name = "WaypointDropdown"
-    dropdownFrame.Size = UDim2.new(0, 220, 0, 200)
+    dropdownFrame.Size = UDim2.new(0, 280, 0, 200)
     dropdownFrame.Position = UDim2.new(0, 0, 0, 30)
     dropdownFrame.BackgroundColor3 = Color3.fromRGB(30,30,40)
     dropdownFrame.BackgroundTransparency = 0.1
@@ -615,7 +636,7 @@ local function refreshDropdown()
         itemCorner.Parent = item
 
         local label = Instance.new("TextLabel")
-        label.Size = UDim2.new(0.5, 0, 1, 0)
+        label.Size = UDim2.new(0.35, 0, 1, 0)
         label.Position = UDim2.new(0.02, 0, 0, 0)
         label.BackgroundTransparency = 1
         label.Font = Enum.Font.Gotham
@@ -626,28 +647,47 @@ local function refreshDropdown()
         label.ZIndex = 153
         label.Parent = item
 
-        local teleportBtn = Instance.new("TextButton")
-        teleportBtn.Size = UDim2.new(0.2, 0, 0.7, 0)
-        teleportBtn.Position = UDim2.new(0.55, 0, 0.15, 0)
-        teleportBtn.BackgroundColor3 = Color3.fromRGB(0,150,0)
-        teleportBtn.BackgroundTransparency = 0.2
-        teleportBtn.BorderSizePixel = 0
-        teleportBtn.Font = Enum.Font.GothamBold
-        teleportBtn.TextSize = 11
-        teleportBtn.TextColor3 = Color3.new(1,1,1)
-        teleportBtn.Text = "TP"
-        teleportBtn.ZIndex = 153
-        teleportBtn.Parent = item
+        local instantBtn = Instance.new("TextButton")
+        instantBtn.Size = UDim2.new(0.15, 0, 0.7, 0)
+        instantBtn.Position = UDim2.new(0.38, 0, 0.15, 0)
+        instantBtn.BackgroundColor3 = Color3.fromRGB(0,150,0)
+        instantBtn.BackgroundTransparency = 0.2
+        instantBtn.BorderSizePixel = 0
+        instantBtn.Font = Enum.Font.GothamBold
+        instantBtn.TextSize = 11
+        instantBtn.TextColor3 = Color3.new(1,1,1)
+        instantBtn.Text = "TP"
+        instantBtn.ZIndex = 153
+        instantBtn.Parent = item
         local tpCorner = Instance.new("UICorner")
         tpCorner.CornerRadius = UDim.new(0.2, 0)
-        tpCorner.Parent = teleportBtn
-        teleportBtn.MouseButton1Click:Connect(function()
-            teleportToWaypoint(wp.position)
+        tpCorner.Parent = instantBtn
+        instantBtn.MouseButton1Click:Connect(function()
+            instantTeleportToWaypoint(wp.position)
+        end)
+
+        local smoothBtn = Instance.new("TextButton")
+        smoothBtn.Size = UDim2.new(0.15, 0, 0.7, 0)
+        smoothBtn.Position = UDim2.new(0.55, 0, 0.15, 0)
+        smoothBtn.BackgroundColor3 = Color3.fromRGB(200,150,0)
+        smoothBtn.BackgroundTransparency = 0.2
+        smoothBtn.BorderSizePixel = 0
+        smoothBtn.Font = Enum.Font.GothamBold
+        smoothBtn.TextSize = 11
+        smoothBtn.TextColor3 = Color3.new(1,1,1)
+        smoothBtn.Text = "BP"
+        smoothBtn.ZIndex = 153
+        smoothBtn.Parent = item
+        local bpCorner = Instance.new("UICorner")
+        bpCorner.CornerRadius = UDim.new(0.2, 0)
+        bpCorner.Parent = smoothBtn
+        smoothBtn.MouseButton1Click:Connect(function()
+            smoothTeleportToWaypoint(wp.position)
         end)
 
         local deleteBtn = Instance.new("TextButton")
-        deleteBtn.Size = UDim2.new(0.2, 0, 0.7, 0)
-        deleteBtn.Position = UDim2.new(0.78, 0, 0.15, 0)
+        deleteBtn.Size = UDim2.new(0.15, 0, 0.7, 0)
+        deleteBtn.Position = UDim2.new(0.72, 0, 0.15, 0)
         deleteBtn.BackgroundColor3 = Color3.fromRGB(150,0,0)
         deleteBtn.BackgroundTransparency = 0.2
         deleteBtn.BorderSizePixel = 0
