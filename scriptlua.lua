@@ -1,5 +1,5 @@
 -- ==============================================
--- EXVS ► Multi Tool (полная версия с waypoints, якорем, сидячим полётом)
+-- EXVS ► Multi Tool (исправленная версия)
 -- ==============================================
 
 local Players = game:GetService("Players")
@@ -480,7 +480,6 @@ local yStabilizerAttachment = nil
 
 local flyBodyGyro = nil
 local flyBodyVelocity = nil
-local flyTargetPart = nil
 local flyControls = {f=0,b=0,l=0,r=0}
 local lastFlyControls = {f=0,b=0,l=0,r=0}
 local currentFlySpeed = 0
@@ -628,6 +627,7 @@ local function createWaypointMenu()
         wpMenuGui = nil
     end)
     local listFrame = Instance.new("ScrollingFrame")
+    listFrame.Name = "ListFrame"
     listFrame.Size = UDim2.new(1, -8, 1, -38)
     listFrame.Position = UDim2.new(0, 4, 0, 34)
     listFrame.BackgroundTransparency = 1
@@ -663,30 +663,14 @@ local function saveWaypoint()
     if wpMenuGui then refreshWaypointMenu() end
 end
 
-local function loadWaypoint(id)
-    if not hrp then return end
-    local pos = waypoints[id]
-    if pos then
-        hrp.CFrame = CFrame.new(pos + Vector3.new(0,3,0))
-        allowTempTeleport(0.5)
-        resetStabilization()
-        Notify(string.format("Teleported to way-%03d", id), "Waypoint", 2)
-    end
+-- Move Stab anchor and input detection
+local function isInputActive()
+    return UIS:IsKeyDown(Enum.KeyCode.W) or UIS:IsKeyDown(Enum.KeyCode.S) or
+           UIS:IsKeyDown(Enum.KeyCode.A) or UIS:IsKeyDown(Enum.KeyCode.D)
 end
 
-local function deleteWaypoint(id)
-    waypoints[id] = nil
-    if wpMenuGui then refreshWaypointMenu() end
-    Notify(string.format("Deleted waypoint way-%03d", id), "Waypoint", 2)
-end
-
--- Move Stab anchor logic
 local function updateMoveStabAnchor()
     if not moveStabEnabled then
-        if anchorBodyPosition then anchorBodyPosition:Destroy() anchorBodyPosition = nil end
-        return
-    end
-    if speedMethod ~= "Tween" and speedMethod ~= "CFrame" then
         if anchorBodyPosition then anchorBodyPosition:Destroy() anchorBodyPosition = nil end
         return
     end
@@ -708,47 +692,51 @@ local function updateMoveStabAnchor()
     end
 end
 
--- Fly with seat support
-local function getSeatPart()
-    local seat = humanoid.SeatPart
-    if seat and seat:IsA("BasePart") and seat:IsDescendantOf(workspace) then
-        return seat
-    end
-    return nil
+-- Y Stabilizer (adaptive, stronger)
+local function createYStabilizer()
+    if yStabilizerForce then yStabilizerForce:Destroy() end
+    if yStabilizerAttachment then yStabilizerAttachment:Destroy() end
+    if not yStabEnabled then return end
+    if not hrp then return end
+    yStabilizerAttachment = Instance.new("Attachment")
+    yStabilizerAttachment.Parent = hrp
+    yStabilizerForce = Instance.new("VectorForce")
+    yStabilizerForce.Name = "YStabilizer"
+    yStabilizerForce.Attachment0 = yStabilizerAttachment
+    yStabilizerForce.Force = Vector3.new(0, 0, 0)
+    yStabilizerForce.RelativeTo = Enum.ActuatorRelativeTo.World
+    yStabilizerForce.Parent = hrp
 end
 
+local function updateYStabilizer()
+    if not yStabEnabled or not yStabilizerForce then return end
+    if not hrp then return end
+    local state = humanoid:GetState()
+    if state ~= Enum.HumanoidStateType.Jumping and state ~= Enum.HumanoidStateType.Freefall then
+        local vy = hrp.Velocity.Y
+        if vy > 0 then
+            local forceMagnitude = vy * 8000
+            yStabilizerForce.Force = Vector3.new(0, -forceMagnitude, 0)
+        else
+            yStabilizerForce.Force = Vector3.new(0, 0, 0)
+        end
+    else
+        yStabilizerForce.Force = Vector3.new(0, 0, 0)
+    end
+end
+
+local function destroyYStabilizer()
+    if yStabilizerForce then yStabilizerForce:Destroy() yStabilizerForce = nil end
+    if yStabilizerAttachment then yStabilizerAttachment:Destroy() yStabilizerAttachment = nil end
+end
+
+-- Fly logic (original, no seat modification)
 local function disableFlyEXVS()
-    if flyBodyGyro then
-        flyBodyGyro:Destroy()
-        flyBodyGyro = nil
-    end
-    if flyBodyVelocity then
-        flyBodyVelocity:Destroy()
-        flyBodyVelocity = nil
-    end
+    if flyBodyGyro then flyBodyGyro:Destroy() end
+    if flyBodyVelocity then flyBodyVelocity:Destroy() end
     humanoid.PlatformStand = false
     flyControls = {f=0,b=0,l=0,r=0}
     currentFlySpeed = 0
-    flyTargetPart = nil
-end
-
-local function enableFlyOnTarget(target)
-    if not target then return end
-    flyTargetPart = target
-    flyBodyGyro = Instance.new("BodyGyro")
-    flyBodyGyro.P = 9e4
-    flyBodyGyro.MaxTorque = Vector3.new(9e9,9e9,9e9)
-    flyBodyGyro.CFrame = target.CFrame
-    flyBodyGyro.Parent = target
-    flyBodyVelocity = Instance.new("BodyVelocity")
-    flyBodyVelocity.Velocity = Vector3.new(0,0,0)
-    flyBodyVelocity.MaxForce = Vector3.new(9e9,9e9,9e9)
-    flyBodyVelocity.Parent = target
-    humanoid.PlatformStand = true
-end
-
-local function isPlayerSitting()
-    return humanoid.Sit and humanoid.SeatPart ~= nil
 end
 
 local function toggleFly()
@@ -758,23 +746,23 @@ local function toggleFly()
         destroyAllSpeedControllers()
         humanoid.WalkSpeed = BASE_WALK_SPEED
         if hrp then hrp.Velocity = Vector3.new(0, hrp.Velocity.Y, 0) end
-        local target = hrp
-        if isPlayerSitting() then
-            local seat = getSeatPart()
-            if seat then target = seat end
-        end
-        enableFlyOnTarget(target)
+        flyBodyGyro = Instance.new("BodyGyro")
+        flyBodyGyro.P = 9e4
+        flyBodyGyro.MaxTorque = Vector3.new(9e9,9e9,9e9)
+        flyBodyGyro.CFrame = hrp.CFrame
+        flyBodyGyro.Parent = hrp
+        flyBodyVelocity = Instance.new("BodyVelocity")
+        flyBodyVelocity.Velocity = Vector3.new(0,0,0)
+        flyBodyVelocity.MaxForce = Vector3.new(9e9,9e9,9e9)
+        flyBodyVelocity.Parent = hrp
+        humanoid.PlatformStand = true
         resetStabilization()
     else
         disableFlyEXVS()
     end
 end
 
-local function isInputActive()
-    return UIS:IsKeyDown(Enum.KeyCode.W) or UIS:IsKeyDown(Enum.KeyCode.S) or
-           UIS:IsKeyDown(Enum.KeyCode.A) or UIS:IsKeyDown(Enum.KeyCode.D)
-end
-
+-- Rest of functions (same as before, but with corrected order)
 local function updateStabilization()
     if not moveStabEnabled then return end
     if not hrp or not hrp.Parent then return end
@@ -922,42 +910,6 @@ local function destroyAllSpeedControllers()
             end
         end
     end
-end
-
-local function createYStabilizer()
-    if yStabilizerForce then yStabilizerForce:Destroy() end
-    if yStabilizerAttachment then yStabilizerAttachment:Destroy() end
-    if not yStabEnabled then return end
-    if not hrp then return end
-    yStabilizerAttachment = Instance.new("Attachment")
-    yStabilizerAttachment.Parent = hrp
-    yStabilizerForce = Instance.new("VectorForce")
-    yStabilizerForce.Name = "YStabilizer"
-    yStabilizerForce.Attachment0 = yStabilizerAttachment
-    yStabilizerForce.Force = Vector3.new(0, 0, 0)
-    yStabilizerForce.RelativeTo = Enum.ActuatorRelativeTo.World
-    yStabilizerForce.Parent = hrp
-end
-
-local function updateYStabilizer()
-    if not yStabEnabled or not yStabilizerForce then return end
-    if not hrp then return end
-    local state = humanoid:GetState()
-    if state ~= Enum.HumanoidStateType.Jumping and state ~= Enum.HumanoidStateType.Freefall then
-        local vy = hrp.Velocity.Y
-        if vy > 0 then
-            yStabilizerForce.Force = Vector3.new(0, -vy * 4000, 0)
-        else
-            yStabilizerForce.Force = Vector3.new(0, 0, 0)
-        end
-    else
-        yStabilizerForce.Force = Vector3.new(0, 0, 0)
-    end
-end
-
-local function destroyYStabilizer()
-    if yStabilizerForce then yStabilizerForce:Destroy() yStabilizerForce = nil end
-    if yStabilizerAttachment then yStabilizerAttachment:Destroy() yStabilizerAttachment = nil end
 end
 
 local function ensureBodyVelocity()
@@ -1510,7 +1462,7 @@ local function applySpeed()
     local dir = humanoid.MoveDirection
     local targetSpeed = BASE_WALK_SPEED * currentSpeedMult
 
-    if flyEnabled and flyBodyGyro and flyBodyVelocity and flyTargetPart and flyTargetPart.Parent then
+    if flyEnabled and flyBodyGyro and flyBodyVelocity then
         local currentFlySpeedValue = baseFlySpeed * flySpeedMult
         if flyControls.l+flyControls.r ~= 0 or flyControls.f+flyControls.b ~= 0 then
             currentFlySpeed = currentFlySpeed + 0.5 + (currentFlySpeed/currentFlySpeedValue)
