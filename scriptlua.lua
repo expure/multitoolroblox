@@ -419,7 +419,7 @@ local instructionLabel = Instance.new("TextLabel")
 instructionLabel.Size = UDim2.new(0.96, 0, 1, 0)
 instructionLabel.Position = UDim2.new(0.02, 0, 0.02, 0)
 instructionLabel.BackgroundTransparency = 1
-instructionLabel.Text = "Recommended speed-up method: Legit. Use Strength mode to push/pull heavy objects. If Grabber or Puncher don't working, nudge, jump, or touch the target until they activate. Y‑Stab counteracts unintended upward impulses (adaptive force). Move‑Stab (works only with Tween/CFrame speed modes) anchors the player and prevents rubberbanding. AimBot: hold RMB to snap camera to the nearest player. Hitbox: increases other players' body parts size by 5x. The Fused tab contains various scripts – some may be broken or low quality, use with caution."
+instructionLabel.Text = "Recommended speed-up method: Legit. Use Strength mode to push/pull heavy objects. If Grabber or Puncher don't working, nudge, jump, or touch the target until they activate. Y‑Stab counteracts unintended upward impulses (adaptive force, disabled when grounded). Move‑Stab prevents rubberbanding or movement without your input (works with any speed mode). AimBot: hold RMB to snap camera to the nearest player. Hitbox: increases other players' body parts size by 5x. The Fused tab contains various scripts – some may be broken or low quality, use with caution."
 instructionLabel.TextColor3 = Color3.fromRGB(220,220,220)
 instructionLabel.Font = Enum.Font.GothamBold
 instructionLabel.TextSize = 12
@@ -484,7 +484,6 @@ local baseFlySpeed = 50
 local activeTween = nil
 local activeMarkers = {}
 local espHighlights = {}
-local espBeams = {}
 local clickTPConnection = nil
 local noclipThread = nil
 local flingCoroutine = nil
@@ -500,8 +499,6 @@ local tempTeleportAllowed = false
 local tempTeleportUntil = 0
 
 local originalPartSizes = {}
-local anchoredParts = {}
-local originalAnchoredState = {}
 
 local waypoints = {}
 local waypointCounter = 0
@@ -562,7 +559,7 @@ local function createDropdown()
     if dropdownFrame then dropdownFrame:Destroy() end
     dropdownFrame = Instance.new("Frame")
     dropdownFrame.Name = "WaypointDropdown"
-    dropdownFrame.Size = UDim2.new(0, 200, 0, 200)
+    dropdownFrame.Size = UDim2.new(0, 220, 0, 200)
     dropdownFrame.Position = UDim2.new(0, 0, 0, 30)
     dropdownFrame.BackgroundColor3 = Color3.fromRGB(30,30,40)
     dropdownFrame.BackgroundTransparency = 0.1
@@ -589,7 +586,7 @@ local function createDropdown()
     layout.Parent = scroll
 
     local function updateScrollSize()
-        scroll.CanvasSize = UDim2.new(0, 0, 0, layout.AbsoluteContentSize.Y)
+        scroll.CanvasSize = UDim2.new(0, 0, 0, layout.AbsoluteContentSize.Y + 8)
     end
     layout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(updateScrollSize)
     updateScrollSize()
@@ -687,32 +684,6 @@ buttons.saveWaypoint.MouseButton1Click:Connect(saveWaypoint)
 local function isInputActive()
     return UIS:IsKeyDown(Enum.KeyCode.W) or UIS:IsKeyDown(Enum.KeyCode.S) or
            UIS:IsKeyDown(Enum.KeyCode.A) or UIS:IsKeyDown(Enum.KeyCode.D)
-end
-
-local function applyAnchoredToCharacter(enable)
-    if not character then return end
-    for _, part in ipairs(character:GetDescendants()) do
-        if part:IsA("BasePart") then
-            if enable then
-                if originalAnchoredState[part] == nil then
-                    originalAnchoredState[part] = part.Anchored
-                end
-                part.Anchored = true
-                table.insert(anchoredParts, part)
-            else
-                local wasAnchored = originalAnchoredState[part]
-                if wasAnchored ~= nil then
-                    part.Anchored = wasAnchored
-                else
-                    part.Anchored = false
-                end
-            end
-        end
-    end
-    if not enable then
-        anchoredParts = {}
-        originalAnchoredState = {}
-    end
 end
 
 local function updateStabilization()
@@ -882,13 +853,14 @@ local function updateYStabilizer()
     if not yStabEnabled or not yStabilizerForce then return end
     if not hrp then return end
     local state = humanoid:GetState()
-    if state ~= Enum.HumanoidStateType.Jumping and state ~= Enum.HumanoidStateType.Freefall then
+    local isGrounded = (humanoid.FloorMaterial ~= Enum.Material.Air)
+    if not isGrounded and state ~= Enum.HumanoidStateType.Jumping and state ~= Enum.HumanoidStateType.Freefall then
         local vy = hrp.Velocity.Y
-        local forceMagnitude = -vy * 12000
+        local forceMagnitude = -vy * 8000
         if vy > 0 then
-            forceMagnitude = forceMagnitude * (1 + math.min(math.abs(vy) * 0.2, 2))
+            forceMagnitude = forceMagnitude * (1 + math.min(math.abs(vy) * 0.15, 3))
         end
-        forceMagnitude = math.clamp(forceMagnitude, -50000, 50000)
+        forceMagnitude = math.clamp(forceMagnitude, -80000, 80000)
         yStabilizerForce.Force = Vector3.new(0, forceMagnitude, 0)
     else
         yStabilizerForce.Force = Vector3.new(0, 0, 0)
@@ -1095,34 +1067,10 @@ local function updateESP()
                     hl.Parent = targetChar
                     espHighlights[otherPlayer] = hl
                 end
-                local localHRP = hrp
-                local targetHRP = targetChar:FindFirstChild("HumanoidRootPart")
-                if localHRP and targetHRP and not espBeams[otherPlayer] then
-                    local beam = Instance.new("Beam")
-                    beam.Color = ColorSequence.new(Color3.new(1,0,0))
-                    beam.Width0 = 0.2
-                    beam.Width1 = 0.2
-                    beam.Brightness = 3
-                    beam.LightEmission = 1
-                    beam.FaceCamera = true
-                    local att0 = Instance.new("Attachment")
-                    att0.Parent = localHRP
-                    att0.Position = Vector3.new(0,1.5,0)
-                    local att1 = Instance.new("Attachment")
-                    att1.Parent = targetHRP
-                    att1.Position = Vector3.new(0,1.5,0)
-                    beam.Attachment0 = att0
-                    beam.Attachment1 = att1
-                    beam.Parent = workspace
-                    espBeams[otherPlayer] = {Beam=beam, Att0=att0, Att1=att1}
-                end
             else
-                if espHighlights[otherPlayer] then espHighlights[otherPlayer]:Destroy() espHighlights[otherPlayer]=nil end
-                if espBeams[otherPlayer] then
-                    espBeams[otherPlayer].Beam:Destroy()
-                    espBeams[otherPlayer].Att0:Destroy()
-                    espBeams[otherPlayer].Att1:Destroy()
-                    espBeams[otherPlayer]=nil
+                if espHighlights[otherPlayer] then
+                    espHighlights[otherPlayer]:Destroy()
+                    espHighlights[otherPlayer] = nil
                 end
             end
         end
@@ -1130,14 +1078,10 @@ local function updateESP()
 end
 
 local function cleanupESP()
-    for _,hl in pairs(espHighlights) do hl:Destroy() end
-    espHighlights = {}
-    for _,data in pairs(espBeams) do
-        data.Beam:Destroy()
-        data.Att0:Destroy()
-        data.Att1:Destroy()
+    for _,hl in pairs(espHighlights) do
+        hl:Destroy()
     end
-    espBeams = {}
+    espHighlights = {}
 end
 
 local function createMarker(pos)
@@ -1682,7 +1626,6 @@ buttons.speedMethod.MouseButton1Click:Connect(function()
             moveStabEnabled = false
             setButtonActive(buttons.stabilize, false)
             buttons.stabilize.Text = "Move Stab OFF"
-            applyAnchoredToCharacter(false)
             resetStabilization()
         end
         if yStabEnabled then
@@ -1826,16 +1769,7 @@ buttons.stabilize.MouseButton1Click:Connect(function()
     moveStabEnabled = not moveStabEnabled
     setButtonActive(buttons.stabilize, moveStabEnabled)
     buttons.stabilize.Text = moveStabEnabled and "Move Stab ON" or "Move Stab OFF"
-    if moveStabEnabled then
-        if speedMethod ~= "Tween" and speedMethod ~= "CFrame" then
-            Notify("Move Stab works best with Tween or CFrame speed mode!", "Warning", 3)
-        end
-        applyAnchoredToCharacter(true)
-        resetStabilization()
-    else
-        applyAnchoredToCharacter(false)
-        resetStabilization()
-    end
+    resetStabilization()
 end)
 
 buttons.aimbot.MouseButton1Click:Connect(function()
@@ -1909,9 +1843,6 @@ player.CharacterAdded:Connect(function(newChar)
         destroyYStabilizer()
         createYStabilizer()
     end
-    if moveStabEnabled then
-        applyAnchoredToCharacter(true)
-    end
     if speedMethod == "Collide" or speedMethod == "Legit" then
         createCollidePlatform()
         if speedMethod == "Legit" then legitCurrentSpeed = 0 end
@@ -1971,9 +1902,6 @@ local function fullCleanup()
         puncherEnabled = false
         enablePuncher()
     end
-    if moveStabEnabled then
-        applyAnchoredToCharacter(false)
-    end
     if hitboxEnabled then
         hitboxEnabled = false
         for _, plr in ipairs(Players:GetPlayers()) do
@@ -1994,18 +1922,6 @@ local function fullCleanup()
     end
     puncherParts = {}
     puncherConnections = {}
-    for _, data in pairs(espBeams) do
-        pcall(function()
-            data.Beam:Destroy()
-            data.Att0:Destroy()
-            data.Att1:Destroy()
-        end)
-    end
-    espBeams = {}
-    for _, hl in pairs(espHighlights) do
-        pcall(function() hl:Destroy() end)
-    end
-    espHighlights = {}
     gui:Destroy()
 end
 
@@ -2133,7 +2049,7 @@ local bindableButtons = {
     {btn = buttons.tweenMove, callback = function() tweenMoveEnabled = not tweenMoveEnabled setButtonActive(buttons.tweenMove, tweenMoveEnabled) if not tweenMoveEnabled then cleanupMarkers() end end, isToggle = true},
     {btn = buttons.fling, callback = function() flingEnabled = not flingEnabled setButtonActive(buttons.fling, flingEnabled) buttons.fling.Text = flingEnabled and "Fling ON" or "Fling OFF" if flingEnabled then enableFling() else disableFling() end end, isToggle = true},
     {btn = buttons.yStab, callback = function() yStabEnabled = not yStabEnabled setButtonActive(buttons.yStab, yStabEnabled) buttons.yStab.Text = yStabEnabled and "Y-Stab ON" or "Y-Stab OFF" if yStabEnabled then createYStabilizer() else destroyYStabilizer() end end, isToggle = true},
-    {btn = buttons.stabilize, callback = function() moveStabEnabled = not moveStabEnabled setButtonActive(buttons.stabilize, moveStabEnabled) buttons.stabilize.Text = moveStabEnabled and "Move Stab ON" or "Move Stab OFF" if moveStabEnabled then if speedMethod ~= "Tween" and speedMethod ~= "CFrame" then Notify("Move Stab works best with Tween or CFrame speed mode!", "Warning", 3) end applyAnchoredToCharacter(true) resetStabilization() else applyAnchoredToCharacter(false) resetStabilization() end end, isToggle = true},
+    {btn = buttons.stabilize, callback = function() moveStabEnabled = not moveStabEnabled setButtonActive(buttons.stabilize, moveStabEnabled) buttons.stabilize.Text = moveStabEnabled and "Move Stab ON" or "Move Stab OFF" resetStabilization() end, isToggle = true},
     {btn = buttons.aimbot, callback = function() aimbotEnabled = not aimbotEnabled setButtonActive(buttons.aimbot, aimbotEnabled) buttons.aimbot.Text = aimbotEnabled and "AimBot ON" or "AimBot OFF" setupAimbot() end, isToggle = true},
     {btn = buttons.puncher, callback = function() puncherEnabled = not puncherEnabled setButtonActive(buttons.puncher, puncherEnabled) buttons.puncher.Text = puncherEnabled and "Puncher ON" or "Puncher OFF" enablePuncher() end, isToggle = true},
     {btn = buttons.hitbox, callback = toggleHitbox, isToggle = true},
