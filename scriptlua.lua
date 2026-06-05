@@ -1492,7 +1492,6 @@ local function applySpeed()
     if not hrp then return end
 
     if speedMethod == "Off" then
-        humanoid.WalkSpeed = BASE_WALK_SPEED
     elseif speedMethod == "BodyVelocity" then
         ensureBodyVelocity()
         if bodyVelocity then bodyVelocity.Velocity = dir * targetSpeed end
@@ -1535,7 +1534,7 @@ local function applySpeed()
 end
 
 local function applyJumpBoost()
-    if humanoid:GetState() == Enum.HumanoidStateType.Jumping then
+    if humanoid:GetState() == Enum.HumanoidStateType.Jumping and currentJumpMult ~= 1 then
         if hrp and not hrp:FindFirstChild("JumpBoost") then
             local at = Instance.new("Attachment", hrp)
             local vf = Instance.new("VectorForce")
