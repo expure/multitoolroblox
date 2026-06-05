@@ -207,8 +207,8 @@ gui.ResetOnSpawn = false
 gui.Parent = player.PlayerGui
 
 local frame = Instance.new("Frame")
-frame.Size = UDim2.new(0.32, 0, 0.78, 0)
-frame.Position = UDim2.new(0.34, 0, 0.10, 0)
+frame.Size = UDim2.new(0.32, 0, 0.8, 0)
+frame.Position = UDim2.new(0.34, 0, 0.1, 0)
 frame.BackgroundColor3 = Color3.fromRGB(20, 20, 30)
 frame.BackgroundTransparency = 0.3
 frame.BorderSizePixel = 0
@@ -271,8 +271,8 @@ addContainer("buttons2", 0.27)
 addContainer("flySpeed", 0.34)
 addContainer("extra", 0.41)
 addContainer("extra2", 0.48)
-addContainer("instruction", 0.55, 0.12)
-addContainer("waypoints", 0.69, 0.08)
+addContainer("waypoints", 0.55, 0.06)
+addContainer("instruction", 0.63, 0.14)
 
 local sliders = {}
 local function addSlider(container, name, labelText, isLog, minVal, maxVal, defaultVal)
@@ -399,8 +399,8 @@ buttons.aimbot = createButton(containers.extra2, "AimBot OFF", Color3.fromRGB(15
 buttons.puncher = createButton(containers.extra2, "Puncher OFF", Color3.fromRGB(200,100,0), 0.48, 0.22)
 buttons.grabber = createButton(containers.extra2, "Grabber", Color3.fromRGB(0,100,150), 0.72, 0.22)
 
-buttons.saveWP = createButton(containers.waypoints, "Save WP", Color3.fromRGB(0,150,0), 0, 0.45)
-buttons.wpList = createButton(containers.waypoints, "WP List", Color3.fromRGB(0,100,200), 0.5, 0.45)
+buttons.waypoints = createButton(containers.waypoints, "Waypoints", Color3.fromRGB(100,100,200), 0, 0.45)
+buttons.saveWaypoint = createButton(containers.waypoints, "Save WP", Color3.fromRGB(0,150,0), 0.48, 0.45)
 
 buttons.fly.TextColor3 = Color3.fromRGB(0,0,0)
 buttons.esp.TextColor3 = Color3.fromRGB(0,0,0)
@@ -412,14 +412,14 @@ buttons.aimbot.TextColor3 = Color3.fromRGB(255,255,255)
 buttons.puncher.TextColor3 = Color3.fromRGB(255,255,255)
 buttons.grabber.TextColor3 = Color3.fromRGB(255,255,255)
 buttons.noclip.TextColor3 = Color3.fromRGB(0,0,0)
-buttons.saveWP.TextColor3 = Color3.fromRGB(255,255,255)
-buttons.wpList.TextColor3 = Color3.fromRGB(255,255,255)
+buttons.waypoints.TextColor3 = Color3.fromRGB(255,255,255)
+buttons.saveWaypoint.TextColor3 = Color3.fromRGB(255,255,255)
 
 local instructionLabel = Instance.new("TextLabel")
 instructionLabel.Size = UDim2.new(0.96, 0, 1, 0)
 instructionLabel.Position = UDim2.new(0.02, 0, 0.02, 0)
 instructionLabel.BackgroundTransparency = 1
-instructionLabel.Text = "Recommended speed-up method: Legit. Use Strength mode to push/pull heavy objects. If Grabber or Puncher don't working, nudge, jump, or touch the target until they activate. Y‑Stab counteracts unintended upward impulses (e.g., from high speed), keeping you grounded while running. Move‑Stab: when Speed Method is CFrame or Tween, it anchors you when idle; otherwise it only prevents rubberbanding. AimBot: hold RMB to snap camera to the nearest player. Hitbox: increases other players' body parts size by 5x. The Fused tab contains various scripts – some may be broken or low quality, use with caution."
+instructionLabel.Text = "Recommended speed-up method: Legit. Use Strength mode to push/pull heavy objects. If Grabber or Puncher don't working, nudge, jump, or touch the target until they activate. Y‑Stab counteracts unintended upward impulses (adaptive force). Move‑Stab (works only with Tween/CFrame speed modes) anchors the player and prevents rubberbanding. AimBot: hold RMB to snap camera to the nearest player. Hitbox: increases other players' body parts size by 5x. The Fused tab contains various scripts – some may be broken or low quality, use with caution."
 instructionLabel.TextColor3 = Color3.fromRGB(220,220,220)
 instructionLabel.Font = Enum.Font.GothamBold
 instructionLabel.TextSize = 12
@@ -498,279 +498,221 @@ local lastUpdateStabTime = tick()
 local inputActive = false
 local tempTeleportAllowed = false
 local tempTeleportUntil = 0
-local anchorBodyPosition = nil
 
 local originalPartSizes = {}
+local anchoredParts = {}
+local originalAnchoredState = {}
 
 local waypoints = {}
-local wpDropdown = nil
+local waypointCounter = 0
 
-local function refreshWaypointDropdown()
-    if not wpDropdown or not wpDropdown:FindFirstChild("ListFrame") then return end
-    local listFrame = wpDropdown:FindFirstChild("ListFrame")
-    for _, child in ipairs(listFrame:GetChildren()) do
-        if child:IsA("Frame") then child:Destroy() end
-    end
-    local layout = listFrame:FindFirstChildOfClass("UIListLayout")
-    if not layout then
-        layout = Instance.new("UIListLayout")
-        layout.Padding = UDim.new(0, 2)
-        layout.SortOrder = Enum.SortOrder.LayoutOrder
-        layout.Parent = listFrame
-    end
-    for id, pos in pairs(waypoints) do
-        local entry = Instance.new("Frame")
-        entry.Size = UDim2.new(1, -8, 0, 24)
-        entry.BackgroundColor3 = Color3.fromRGB(40,40,50)
-        entry.BorderSizePixel = 0
-        entry.Parent = listFrame
-        local label = Instance.new("TextLabel")
-        label.Size = UDim2.new(0.5, 0, 1, 0)
-        label.Position = UDim2.new(0, 4, 0, 0)
-        label.BackgroundTransparency = 1
-        label.Text = string.format("way-%03d", id)
-        label.TextColor3 = Color3.fromRGB(255,255,255)
-        label.Font = Enum.Font.Gotham
-        label.TextSize = 12
-        label.TextXAlignment = Enum.TextXAlignment.Left
-        label.Parent = entry
-        local tpBtn = Instance.new("TextButton")
-        tpBtn.Size = UDim2.new(0, 50, 1, -2)
-        tpBtn.Position = UDim2.new(0.5, 0, 0, 1)
-        tpBtn.Text = "TP"
-        tpBtn.BackgroundColor3 = Color3.fromRGB(0,150,0)
-        tpBtn.TextColor3 = Color3.fromRGB(255,255,255)
-        tpBtn.Font = Enum.Font.GothamBold
-        tpBtn.TextSize = 11
-        tpBtn.Parent = entry
-        tpBtn.MouseButton1Click:Connect(function()
-            if hrp then
-                hrp.CFrame = CFrame.new(pos + Vector3.new(0,3,0))
-                allowTempTeleport(0.5)
-                resetStabilization()
-            end
-            wpDropdown.Visible = false
-        end)
-        local delBtn = Instance.new("TextButton")
-        delBtn.Size = UDim2.new(0, 40, 1, -2)
-        delBtn.Position = UDim2.new(0.75, 0, 0, 1)
-        delBtn.Text = "Del"
-        delBtn.BackgroundColor3 = Color3.fromRGB(150,0,0)
-        delBtn.TextColor3 = Color3.fromRGB(255,255,255)
-        delBtn.Font = Enum.Font.GothamBold
-        delBtn.TextSize = 11
-        delBtn.Parent = entry
-        delBtn.MouseButton1Click:Connect(function()
-            waypoints[id] = nil
-            refreshWaypointDropdown()
-            Notify(string.format("Deleted waypoint way-%03d", id), "Waypoint", 2)
-        end)
-        local corner = Instance.new("UICorner")
-        corner.CornerRadius = UDim.new(0.2,0)
-        corner.Parent = entry
-    end
-    listFrame.CanvasSize = UDim2.new(0,0,0, layout.AbsoluteContentSize.Y + 4)
+local function formatWaypointNumber(num)
+    return string.format("way-%03d", num)
 end
 
-local function createWaypointDropdown()
-    if wpDropdown then
-        wpDropdown.Visible = not wpDropdown.Visible
-        return
+local function updateWaypointCounter()
+    local maxNum = 0
+    for _, wp in ipairs(waypoints) do
+        local num = tonumber(wp.name:match("way-(%d+)"))
+        if num and num > maxNum then maxNum = num end
     end
-    wpDropdown = Instance.new("Frame")
-    wpDropdown.Name = "WPDropdown"
-    wpDropdown.Size = UDim2.new(0, 200, 0, 200)
-    wpDropdown.Position = UDim2.new(buttons.wpList.AbsolutePosition.X.Scale, buttons.wpList.AbsolutePosition.Y.Offset + 30, 0, 0)
-    wpDropdown.BackgroundColor3 = Color3.fromRGB(25,25,35)
-    wpDropdown.BackgroundTransparency = 0.1
-    wpDropdown.BorderSizePixel = 0
-    wpDropdown.Visible = true
-    wpDropdown.ZIndex = 200
-    wpDropdown.Parent = gui
-    local corner = Instance.new("UICorner")
-    corner.CornerRadius = UDim.new(0.02,0)
-    corner.Parent = wpDropdown
-    local stroke = Instance.new("UIStroke")
-    stroke.Color = Color3.fromRGB(100,100,150)
-    stroke.Thickness = 1
-    stroke.Transparency = 0.5
-    stroke.Parent = wpDropdown
-    local titleBar = Instance.new("Frame")
-    titleBar.Size = UDim2.new(1,0,0,24)
-    titleBar.BackgroundColor3 = Color3.fromRGB(0,80,0)
-    titleBar.Parent = wpDropdown
-    local titleLabel = Instance.new("TextLabel")
-    titleLabel.Size = UDim2.new(1, -24, 1, 0)
-    titleLabel.Position = UDim2.new(0, 4, 0, 0)
-    titleLabel.Text = "Waypoints"
-    titleLabel.TextColor3 = Color3.fromRGB(255,255,255)
-    titleLabel.Font = Enum.Font.GothamBold
-    titleLabel.TextSize = 14
-    titleLabel.BackgroundTransparency = 1
-    titleLabel.Parent = titleBar
-    local closeBtn = Instance.new("TextButton")
-    closeBtn.Size = UDim2.new(0, 20, 1, 0)
-    closeBtn.Position = UDim2.new(1, -20, 0, 0)
-    closeBtn.Text = "X"
-    closeBtn.BackgroundColor3 = Color3.fromRGB(150,30,30)
-    closeBtn.TextColor3 = Color3.fromRGB(255,255,255)
-    closeBtn.Font = Enum.Font.GothamBold
-    closeBtn.TextSize = 12
-    closeBtn.Parent = titleBar
-    closeBtn.MouseButton1Click:Connect(function()
-        wpDropdown.Visible = false
-    end)
-    local listFrame = Instance.new("ScrollingFrame")
-    listFrame.Name = "ListFrame"
-    listFrame.Size = UDim2.new(1, -4, 1, -28)
-    listFrame.Position = UDim2.new(0, 2, 0, 26)
-    listFrame.BackgroundTransparency = 1
-    listFrame.CanvasSize = UDim2.new(0,0,0,0)
-    listFrame.ScrollBarThickness = 4
-    listFrame.Parent = wpDropdown
-    local layout = Instance.new("UIListLayout")
-    layout.Padding = UDim.new(0, 2)
-    layout.SortOrder = Enum.SortOrder.LayoutOrder
-    layout.Parent = listFrame
-    refreshWaypointDropdown()
-    local function closeOnClickOutside(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 then
-            local pos = input.Position
-            local absPos = wpDropdown.AbsolutePosition
-            local size = wpDropdown.AbsoluteSize
-            if not (pos.X >= absPos.X and pos.X <= absPos.X + size.X and pos.Y >= absPos.Y and pos.Y <= absPos.Y + size.Y) then
-                wpDropdown.Visible = false
-                UIS.InputBegan:Disconnect(closeConn)
-            end
-        end
-    end
-    local closeConn
-    closeConn = UIS.InputBegan:Connect(closeOnClickOutside)
+    waypointCounter = maxNum
 end
 
 local function saveWaypoint()
-    if not hrp then
-        NotifyERROR("No HRP to save position")
-        return
+    if not hrp then return end
+    waypointCounter = waypointCounter + 1
+    local name = formatWaypointNumber(waypointCounter)
+    table.insert(waypoints, {name = name, position = hrp.Position})
+    Notify("Waypoint saved: " .. name, "Waypoints", 2)
+    if dropdownFrame and dropdownFrame.Visible then
+        refreshDropdown()
     end
-    local pos = hrp.Position
-    local id = nil
-    for i = 0, 999 do
-        if waypoints[i] == nil then
-            id = i
-            break
-        end
-    end
-    if id == nil then
-        NotifyERROR("Maximum waypoints reached (1000)")
-        return
-    end
-    waypoints[id] = pos
-    Notify(string.format("Saved waypoint way-%03d at position (%.1f, %.1f, %.1f)", id, pos.X, pos.Y, pos.Z), "Waypoint", 3)
-    if wpDropdown and wpDropdown.Visible then refreshWaypointDropdown() end
 end
+
+local function teleportToWaypoint(pos)
+    if hrp then
+        if speedMethod == "Tween" or speedMethod == "CFrame" then
+            if activeTween then activeTween:Cancel() end
+            local dist = (pos - hrp.Position).Magnitude
+            local dur = dist / (BASE_WALK_SPEED * currentSpeedMult * 2)
+            activeTween = TweenService:Create(hrp, TweenInfo.new(dur, Enum.EasingStyle.Linear), {CFrame = CFrame.new(pos + Vector3.new(0,3,0))})
+            activeTween:Play()
+            activeTween.Completed:Connect(function() activeTween = nil end)
+            allowTempTeleport(dur + 0.5)
+        else
+            hrp.CFrame = CFrame.new(pos + Vector3.new(0,3,0))
+            allowTempTeleport(0.5)
+        end
+        resetStabilization()
+    end
+end
+
+local function deleteWaypoint(index)
+    table.remove(waypoints, index)
+    updateWaypointCounter()
+    Notify("Waypoint deleted", "Waypoints", 2)
+    if dropdownFrame and dropdownFrame.Visible then
+        refreshDropdown()
+    end
+end
+
+local dropdownFrame = nil
+local function createDropdown()
+    if dropdownFrame then dropdownFrame:Destroy() end
+    dropdownFrame = Instance.new("Frame")
+    dropdownFrame.Name = "WaypointDropdown"
+    dropdownFrame.Size = UDim2.new(0, 200, 0, 200)
+    dropdownFrame.Position = UDim2.new(0, 0, 0, 30)
+    dropdownFrame.BackgroundColor3 = Color3.fromRGB(30,30,40)
+    dropdownFrame.BackgroundTransparency = 0.1
+    dropdownFrame.BorderSizePixel = 0
+    dropdownFrame.ZIndex = 150
+    dropdownFrame.Visible = false
+    dropdownFrame.Parent = buttons.waypoints.Parent
+
+    local dropdownCorner = Instance.new("UICorner")
+    dropdownCorner.CornerRadius = UDim.new(0.02, 0)
+    dropdownCorner.Parent = dropdownFrame
+
+    local scroll = Instance.new("ScrollingFrame")
+    scroll.Size = UDim2.new(1, 0, 1, 0)
+    scroll.BackgroundTransparency = 1
+    scroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+    scroll.ScrollBarThickness = 6
+    scroll.ZIndex = 151
+    scroll.Parent = dropdownFrame
+
+    local layout = Instance.new("UIListLayout")
+    layout.Padding = UDim.new(0, 4)
+    layout.SortOrder = Enum.SortOrder.LayoutOrder
+    layout.Parent = scroll
+
+    local function updateScrollSize()
+        scroll.CanvasSize = UDim2.new(0, 0, 0, layout.AbsoluteContentSize.Y)
+    end
+    layout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(updateScrollSize)
+    updateScrollSize()
+
+    return scroll, layout
+end
+
+local function refreshDropdown()
+    if not dropdownFrame then return end
+    local scroll = dropdownFrame:FindFirstChildOfClass("ScrollingFrame")
+    if not scroll then return end
+    for _, child in ipairs(scroll:GetChildren()) do
+        if child:IsA("Frame") then child:Destroy() end
+    end
+    for i, wp in ipairs(waypoints) do
+        local item = Instance.new("Frame")
+        item.Size = UDim2.new(1, -8, 0, 28)
+        item.BackgroundColor3 = Color3.fromRGB(40,40,50)
+        item.BackgroundTransparency = 0.2
+        item.BorderSizePixel = 0
+        item.ZIndex = 152
+        item.Parent = scroll
+
+        local itemCorner = Instance.new("UICorner")
+        itemCorner.CornerRadius = UDim.new(0.02, 0)
+        itemCorner.Parent = item
+
+        local label = Instance.new("TextLabel")
+        label.Size = UDim2.new(0.5, 0, 1, 0)
+        label.Position = UDim2.new(0.02, 0, 0, 0)
+        label.BackgroundTransparency = 1
+        label.Font = Enum.Font.Gotham
+        label.TextSize = 12
+        label.TextColor3 = Color3.new(1,1,1)
+        label.Text = wp.name
+        label.TextXAlignment = Enum.TextXAlignment.Left
+        label.Parent = item
+
+        local teleportBtn = Instance.new("TextButton")
+        teleportBtn.Size = UDim2.new(0.2, 0, 0.7, 0)
+        teleportBtn.Position = UDim2.new(0.55, 0, 0.15, 0)
+        teleportBtn.BackgroundColor3 = Color3.fromRGB(0,150,0)
+        teleportBtn.BackgroundTransparency = 0.2
+        teleportBtn.BorderSizePixel = 0
+        teleportBtn.Font = Enum.Font.GothamBold
+        teleportBtn.TextSize = 11
+        teleportBtn.TextColor3 = Color3.new(1,1,1)
+        teleportBtn.Text = "TP"
+        teleportBtn.Parent = item
+        local tpCorner = Instance.new("UICorner")
+        tpCorner.CornerRadius = UDim.new(0.2, 0)
+        tpCorner.Parent = teleportBtn
+        teleportBtn.MouseButton1Click:Connect(function()
+            teleportToWaypoint(wp.position)
+        end)
+
+        local deleteBtn = Instance.new("TextButton")
+        deleteBtn.Size = UDim2.new(0.2, 0, 0.7, 0)
+        deleteBtn.Position = UDim2.new(0.78, 0, 0.15, 0)
+        deleteBtn.BackgroundColor3 = Color3.fromRGB(150,0,0)
+        deleteBtn.BackgroundTransparency = 0.2
+        deleteBtn.BorderSizePixel = 0
+        deleteBtn.Font = Enum.Font.GothamBold
+        deleteBtn.TextSize = 11
+        deleteBtn.TextColor3 = Color3.new(1,1,1)
+        deleteBtn.Text = "X"
+        deleteBtn.Parent = item
+        local delCorner = Instance.new("UICorner")
+        delCorner.CornerRadius = UDim.new(0.2, 0)
+        delCorner.Parent = deleteBtn
+        deleteBtn.MouseButton1Click:Connect(function()
+            deleteWaypoint(i)
+        end)
+    end
+    local layout = scroll:FindFirstChildOfClass("UIListLayout")
+    if layout then
+        scroll.CanvasSize = UDim2.new(0, 0, 0, layout.AbsoluteContentSize.Y + 8)
+    end
+end
+
+buttons.waypoints.MouseButton1Click:Connect(function()
+    if not dropdownFrame then
+        createDropdown()
+    end
+    dropdownFrame.Visible = not dropdownFrame.Visible
+    if dropdownFrame.Visible then
+        refreshDropdown()
+        local btnPos = buttons.waypoints.AbsolutePosition
+        dropdownFrame.Position = UDim2.new(0, btnPos.X - buttons.waypoints.Parent.AbsolutePosition.X, 0, 30)
+    end
+end)
+
+buttons.saveWaypoint.MouseButton1Click:Connect(saveWaypoint)
 
 local function isInputActive()
     return UIS:IsKeyDown(Enum.KeyCode.W) or UIS:IsKeyDown(Enum.KeyCode.S) or
            UIS:IsKeyDown(Enum.KeyCode.A) or UIS:IsKeyDown(Enum.KeyCode.D)
 end
 
-local function updateMoveStabAnchor()
-    if not moveStabEnabled then
-        if anchorBodyPosition then anchorBodyPosition:Destroy() anchorBodyPosition = nil end
-        return
-    end
-    if speedMethod == "CFrame" or speedMethod == "Tween" then
-        local moving = isInputActive()
-        if not moving and hrp and not flyEnabled then
-            if not anchorBodyPosition then
-                anchorBodyPosition = Instance.new("BodyPosition")
-                anchorBodyPosition.MaxForce = Vector3.new(1e9, 1e9, 1e9)
-                anchorBodyPosition.P = 5000
-                anchorBodyPosition.D = 1000
-                anchorBodyPosition.Parent = hrp
-            end
-            anchorBodyPosition.Position = hrp.Position
-        else
-            if anchorBodyPosition then
-                anchorBodyPosition:Destroy()
-                anchorBodyPosition = nil
+local function applyAnchoredToCharacter(enable)
+    if not character then return end
+    for _, part in ipairs(character:GetDescendants()) do
+        if part:IsA("BasePart") then
+            if enable then
+                if originalAnchoredState[part] == nil then
+                    originalAnchoredState[part] = part.Anchored
+                end
+                part.Anchored = true
+                table.insert(anchoredParts, part)
+            else
+                local wasAnchored = originalAnchoredState[part]
+                if wasAnchored ~= nil then
+                    part.Anchored = wasAnchored
+                else
+                    part.Anchored = false
+                end
             end
         end
-    else
-        if anchorBodyPosition then
-            anchorBodyPosition:Destroy()
-            anchorBodyPosition = nil
-        end
     end
-end
-
-local function disableFlyEXVS()
-    if flyBodyGyro then flyBodyGyro:Destroy() end
-    if flyBodyVelocity then flyBodyVelocity:Destroy() end
-    humanoid.PlatformStand = false
-    flyControls = {f=0,b=0,l=0,r=0}
-    currentFlySpeed = 0
-end
-
-local function toggleFly()
-    flyEnabled = not flyEnabled
-    setButtonActive(buttons.fly, flyEnabled)
-    if flyEnabled then
-        destroyAllSpeedControllers()
-        humanoid.WalkSpeed = BASE_WALK_SPEED
-        if hrp then hrp.Velocity = Vector3.new(0, hrp.Velocity.Y, 0) end
-        flyBodyGyro = Instance.new("BodyGyro")
-        flyBodyGyro.P = 9e4
-        flyBodyGyro.MaxTorque = Vector3.new(9e9,9e9,9e9)
-        flyBodyGyro.CFrame = hrp.CFrame
-        flyBodyGyro.Parent = hrp
-        flyBodyVelocity = Instance.new("BodyVelocity")
-        flyBodyVelocity.Velocity = Vector3.new(0,0,0)
-        flyBodyVelocity.MaxForce = Vector3.new(9e9,9e9,9e9)
-        flyBodyVelocity.Parent = hrp
-        humanoid.PlatformStand = true
-        resetStabilization()
-    else
-        disableFlyEXVS()
+    if not enable then
+        anchoredParts = {}
+        originalAnchoredState = {}
     end
-end
-
-local function createYStabilizer()
-    if yStabilizerForce then yStabilizerForce:Destroy() end
-    if yStabilizerAttachment then yStabilizerAttachment:Destroy() end
-    if not yStabEnabled then return end
-    if not hrp then return end
-    yStabilizerAttachment = Instance.new("Attachment")
-    yStabilizerAttachment.Parent = hrp
-    yStabilizerForce = Instance.new("VectorForce")
-    yStabilizerForce.Name = "YStabilizer"
-    yStabilizerForce.Attachment0 = yStabilizerAttachment
-    yStabilizerForce.Force = Vector3.new(0, 0, 0)
-    yStabilizerForce.RelativeTo = Enum.ActuatorRelativeTo.World
-    yStabilizerForce.Parent = hrp
-end
-
-local function updateYStabilizer()
-    if not yStabEnabled or not yStabilizerForce then return end
-    if not hrp then return end
-    local state = humanoid:GetState()
-    if state ~= Enum.HumanoidStateType.Jumping and state ~= Enum.HumanoidStateType.Freefall then
-        local vy = hrp.Velocity.Y
-        if vy > 0 then
-            local forceMagnitude = vy * 8000
-            yStabilizerForce.Force = Vector3.new(0, -forceMagnitude, 0)
-        else
-            yStabilizerForce.Force = Vector3.new(0, 0, 0)
-        end
-    else
-        yStabilizerForce.Force = Vector3.new(0, 0, 0)
-    end
-end
-
-local function destroyYStabilizer()
-    if yStabilizerForce then yStabilizerForce:Destroy() yStabilizerForce = nil end
-    if yStabilizerAttachment then yStabilizerAttachment:Destroy() yStabilizerAttachment = nil end
 end
 
 local function updateStabilization()
@@ -905,7 +847,6 @@ local function destroyAllSpeedControllers()
     humanoid.PlatformStand = false
     if yStabilizerForce then yStabilizerForce:Destroy() yStabilizerForce = nil end
     if yStabilizerAttachment then yStabilizerAttachment:Destroy() yStabilizerAttachment = nil end
-    if anchorBodyPosition then anchorBodyPosition:Destroy() anchorBodyPosition = nil end
     
     humanoid.WalkSpeed = BASE_WALK_SPEED
     
@@ -920,6 +861,43 @@ local function destroyAllSpeedControllers()
             end
         end
     end
+end
+
+local function createYStabilizer()
+    if yStabilizerForce then yStabilizerForce:Destroy() end
+    if yStabilizerAttachment then yStabilizerAttachment:Destroy() end
+    if not yStabEnabled then return end
+    if not hrp then return end
+    yStabilizerAttachment = Instance.new("Attachment")
+    yStabilizerAttachment.Parent = hrp
+    yStabilizerForce = Instance.new("VectorForce")
+    yStabilizerForce.Name = "YStabilizer"
+    yStabilizerForce.Attachment0 = yStabilizerAttachment
+    yStabilizerForce.Force = Vector3.new(0, 0, 0)
+    yStabilizerForce.RelativeTo = Enum.ActuatorRelativeTo.World
+    yStabilizerForce.Parent = hrp
+end
+
+local function updateYStabilizer()
+    if not yStabEnabled or not yStabilizerForce then return end
+    if not hrp then return end
+    local state = humanoid:GetState()
+    if state ~= Enum.HumanoidStateType.Jumping and state ~= Enum.HumanoidStateType.Freefall then
+        local vy = hrp.Velocity.Y
+        local forceMagnitude = -vy * 12000
+        if vy > 0 then
+            forceMagnitude = forceMagnitude * (1 + math.min(math.abs(vy) * 0.2, 2))
+        end
+        forceMagnitude = math.clamp(forceMagnitude, -50000, 50000)
+        yStabilizerForce.Force = Vector3.new(0, forceMagnitude, 0)
+    else
+        yStabilizerForce.Force = Vector3.new(0, 0, 0)
+    end
+end
+
+local function destroyYStabilizer()
+    if yStabilizerForce then yStabilizerForce:Destroy() yStabilizerForce = nil end
+    if yStabilizerAttachment then yStabilizerAttachment:Destroy() yStabilizerAttachment = nil end
 end
 
 local function ensureBodyVelocity()
@@ -1042,6 +1020,14 @@ local function setNoclip(enabled)
             end
         end
     end
+end
+
+local function disableFlyEXVS()
+    if flyBodyGyro then flyBodyGyro:Destroy() end
+    if flyBodyVelocity then flyBodyVelocity:Destroy() end
+    humanoid.PlatformStand = false
+    flyControls = {f=0,b=0,l=0,r=0}
+    currentFlySpeed = 0
 end
 
 local function enableFling()
@@ -1515,7 +1501,6 @@ local function applySpeed()
     updateStrength()
     updateLegitCollide(dt)
     updateCollideMethod()
-    updateMoveStabAnchor()
 
     if not hrp then return end
 
@@ -1697,8 +1682,8 @@ buttons.speedMethod.MouseButton1Click:Connect(function()
             moveStabEnabled = false
             setButtonActive(buttons.stabilize, false)
             buttons.stabilize.Text = "Move Stab OFF"
+            applyAnchoredToCharacter(false)
             resetStabilization()
-            updateMoveStabAnchor()
         end
         if yStabEnabled then
             yStabEnabled = false
@@ -1729,7 +1714,6 @@ buttons.speedMethod.MouseButton1Click:Connect(function()
     resetStabilization()
     legitCurrentSpeed = 0
     legitLastMoveTime = tick()
-    updateMoveStabAnchor()
 
     if speedMethod == "BodyVelocity" then
         ensureBodyVelocity()
@@ -1761,7 +1745,28 @@ buttons.speedMethod.MouseButton1Click:Connect(function()
     if speedMethod ~= "Tween" and activeTween then activeTween:Cancel() activeTween = nil end
 end)
 
-buttons.fly.MouseButton1Click:Connect(toggleFly)
+buttons.fly.MouseButton1Click:Connect(function()
+    flyEnabled = not flyEnabled
+    setButtonActive(buttons.fly, flyEnabled)
+    if flyEnabled then
+        destroyAllSpeedControllers()
+        humanoid.WalkSpeed = BASE_WALK_SPEED
+        if hrp then hrp.Velocity = Vector3.new(0, hrp.Velocity.Y, 0) end
+        flyBodyGyro = Instance.new("BodyGyro")
+        flyBodyGyro.P = 9e4
+        flyBodyGyro.MaxTorque = Vector3.new(9e9,9e9,9e9)
+        flyBodyGyro.CFrame = hrp.CFrame
+        flyBodyGyro.Parent = hrp
+        flyBodyVelocity = Instance.new("BodyVelocity")
+        flyBodyVelocity.Velocity = Vector3.new(0,0,0)
+        flyBodyVelocity.MaxForce = Vector3.new(9e9,9e9,9e9)
+        flyBodyVelocity.Parent = hrp
+        humanoid.PlatformStand = true
+        resetStabilization()
+    else
+        disableFlyEXVS()
+    end
+end)
 
 buttons.esp.MouseButton1Click:Connect(function()
     espEnabled = not espEnabled
@@ -1821,11 +1826,16 @@ buttons.stabilize.MouseButton1Click:Connect(function()
     moveStabEnabled = not moveStabEnabled
     setButtonActive(buttons.stabilize, moveStabEnabled)
     buttons.stabilize.Text = moveStabEnabled and "Move Stab ON" or "Move Stab OFF"
-    if not moveStabEnabled and anchorBodyPosition then
-        anchorBodyPosition:Destroy()
-        anchorBodyPosition = nil
+    if moveStabEnabled then
+        if speedMethod ~= "Tween" and speedMethod ~= "CFrame" then
+            Notify("Move Stab works best with Tween or CFrame speed mode!", "Warning", 3)
+        end
+        applyAnchoredToCharacter(true)
+        resetStabilization()
+    else
+        applyAnchoredToCharacter(false)
+        resetStabilization()
     end
-    resetStabilization()
 end)
 
 buttons.aimbot.MouseButton1Click:Connect(function()
@@ -1848,9 +1858,6 @@ buttons.grabber.MouseButton1Click:Connect(function()
 end)
 
 buttons.hitbox.MouseButton1Click:Connect(toggleHitbox)
-
-buttons.saveWP.MouseButton1Click:Connect(saveWaypoint)
-buttons.wpList.MouseButton1Click:Connect(createWaypointDropdown)
 
 UIS.InputBegan:Connect(function(input, processed)
     if processed or not flyEnabled then return end
@@ -1902,6 +1909,9 @@ player.CharacterAdded:Connect(function(newChar)
         destroyYStabilizer()
         createYStabilizer()
     end
+    if moveStabEnabled then
+        applyAnchoredToCharacter(true)
+    end
     if speedMethod == "Collide" or speedMethod == "Legit" then
         createCollidePlatform()
         if speedMethod == "Legit" then legitCurrentSpeed = 0 end
@@ -1941,7 +1951,6 @@ player.CharacterAdded:Connect(function(newChar)
     resetStabilization()
     setupAimbot()
     if puncherEnabled then enablePuncher() end
-    updateMoveStabAnchor()
 end)
 
 local function fullCleanup()
@@ -1962,6 +1971,9 @@ local function fullCleanup()
         puncherEnabled = false
         enablePuncher()
     end
+    if moveStabEnabled then
+        applyAnchoredToCharacter(false)
+    end
     if hitboxEnabled then
         hitboxEnabled = false
         for _, plr in ipairs(Players:GetPlayers()) do
@@ -1971,10 +1983,9 @@ local function fullCleanup()
         end
         originalPartSizes = {}
     end
-    if anchorBodyPosition then anchorBodyPosition:Destroy() end
     if fusedPanel then fusedPanel:Destroy() end
     if grabberTool then grabberTool:Destroy() end
-    if wpDropdown then wpDropdown:Destroy() end
+    if dropdownFrame then dropdownFrame:Destroy() end
     for _, conn in pairs(puncherConnections) do
         if type(conn) == "RBXScriptConnection" then pcall(function() conn:Disconnect() end) end
     end
@@ -2116,13 +2127,13 @@ local bindableButtons = {
     {btn = buttons.fullbright, callback = function() _G.FullBrightEnabled = not _G.FullBrightEnabled setButtonActive(buttons.fullbright, _G.FullBrightEnabled) end, isToggle = true},
     {btn = buttons.infJump, callback = function() _G.InfiniteJumpEnabled = not _G.InfiniteJumpEnabled setButtonActive(buttons.infJump, _G.InfiniteJumpEnabled) end, isToggle = true},
     {btn = buttons.noclip, callback = function() setNoclip(not noclipEnabled) setButtonActive(buttons.noclip, noclipEnabled) buttons.noclip.Text = noclipEnabled and "Noclip ON" or "Noclip OFF" end, isToggle = true},
-    {btn = buttons.fly, callback = toggleFly, isToggle = true},
+    {btn = buttons.fly, callback = function() flyEnabled = not flyEnabled setButtonActive(buttons.fly, flyEnabled) if flyEnabled then destroyAllSpeedControllers() humanoid.WalkSpeed = BASE_WALK_SPEED if hrp then hrp.Velocity = Vector3.new(0, hrp.Velocity.Y, 0) end flyBodyGyro = Instance.new("BodyGyro") flyBodyGyro.P = 9e4 flyBodyGyro.MaxTorque = Vector3.new(9e9,9e9,9e9) flyBodyGyro.CFrame = hrp.CFrame flyBodyGyro.Parent = hrp flyBodyVelocity = Instance.new("BodyVelocity") flyBodyVelocity.Velocity = Vector3.new(0,0,0) flyBodyVelocity.MaxForce = Vector3.new(9e9,9e9,9e9) flyBodyVelocity.Parent = hrp humanoid.PlatformStand = true resetStabilization() else disableFlyEXVS() end end, isToggle = true},
     {btn = buttons.esp, callback = function() espEnabled = not espEnabled setButtonActive(buttons.esp, espEnabled) buttons.esp.Text = espEnabled and "ESP ON" or "ESP OFF" if espEnabled then updateESP() else cleanupESP() end end, isToggle = true},
     {btn = buttons.clickTP, callback = function() clickTPEnabled = not clickTPEnabled setButtonActive(buttons.clickTP, clickTPEnabled) if clickTPEnabled then if clickTPConnection then clickTPConnection:Disconnect() end clickTPConnection = UIS.InputBegan:Connect(function(input, processed) if processed or not clickTPEnabled then return end if input.UserInputType == Enum.UserInputType.MouseButton1 then local target = Mouse.Hit.Position if hrp then hrp.CFrame = CFrame.new(target + Vector3.new(0,3,0)) allowTempTeleport(0.5) resetStabilization() end end end) else if clickTPConnection then clickTPConnection:Disconnect() clickTPConnection = nil end end end, isToggle = true},
     {btn = buttons.tweenMove, callback = function() tweenMoveEnabled = not tweenMoveEnabled setButtonActive(buttons.tweenMove, tweenMoveEnabled) if not tweenMoveEnabled then cleanupMarkers() end end, isToggle = true},
     {btn = buttons.fling, callback = function() flingEnabled = not flingEnabled setButtonActive(buttons.fling, flingEnabled) buttons.fling.Text = flingEnabled and "Fling ON" or "Fling OFF" if flingEnabled then enableFling() else disableFling() end end, isToggle = true},
     {btn = buttons.yStab, callback = function() yStabEnabled = not yStabEnabled setButtonActive(buttons.yStab, yStabEnabled) buttons.yStab.Text = yStabEnabled and "Y-Stab ON" or "Y-Stab OFF" if yStabEnabled then createYStabilizer() else destroyYStabilizer() end end, isToggle = true},
-    {btn = buttons.stabilize, callback = function() moveStabEnabled = not moveStabEnabled setButtonActive(buttons.stabilize, moveStabEnabled) buttons.stabilize.Text = moveStabEnabled and "Move Stab ON" or "Move Stab OFF" if not moveStabEnabled and anchorBodyPosition then anchorBodyPosition:Destroy() anchorBodyPosition = nil end resetStabilization() end, isToggle = true},
+    {btn = buttons.stabilize, callback = function() moveStabEnabled = not moveStabEnabled setButtonActive(buttons.stabilize, moveStabEnabled) buttons.stabilize.Text = moveStabEnabled and "Move Stab ON" or "Move Stab OFF" if moveStabEnabled then if speedMethod ~= "Tween" and speedMethod ~= "CFrame" then Notify("Move Stab works best with Tween or CFrame speed mode!", "Warning", 3) end applyAnchoredToCharacter(true) resetStabilization() else applyAnchoredToCharacter(false) resetStabilization() end end, isToggle = true},
     {btn = buttons.aimbot, callback = function() aimbotEnabled = not aimbotEnabled setButtonActive(buttons.aimbot, aimbotEnabled) buttons.aimbot.Text = aimbotEnabled and "AimBot ON" or "AimBot OFF" setupAimbot() end, isToggle = true},
     {btn = buttons.puncher, callback = function() puncherEnabled = not puncherEnabled setButtonActive(buttons.puncher, puncherEnabled) buttons.puncher.Text = puncherEnabled and "Puncher ON" or "Puncher OFF" enablePuncher() end, isToggle = true},
     {btn = buttons.hitbox, callback = toggleHitbox, isToggle = true},
