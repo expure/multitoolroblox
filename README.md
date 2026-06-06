@@ -2,8 +2,8 @@
 
 [![MIT license](https://img.shields.io/badge/License-MIT-blue.svg)](https://lbesson.mit-license.org/)
 [![GitHub last commit](https://img.shields.io/github/last-commit/expure/multitoolroblox)](https://github.com/expure/multitoolroblox/commits/main)
-[![GitHub Repo stars](https://img.shields.io/github/stars/expure/multitoolroblox?style=social)](https://github.com/expure/multitoolroblox/stargazers)
 [![Discord](https://img.shields.io/badge/Discord-Join%20Server-5865F2?logo=discord&logoColor=white)](https://discord.gg/ВАША_ССЫЛКА_ПРИГЛАШЕНИЕ)
+[![GitHub Repo stars](https://img.shields.io/github/stars/expure/multitoolroblox?style=social)](https://github.com/expure/multitoolroblox/stargazers)
 [![Total Views](https://hits.seeyoufarm.com/api/count/incr/badge.svg?url=https%3A%2F%2Fgithub.com%2Fexpure%2Fmultitoolroblox&count_bg=%2379C83D&title_bg=%23555555&icon=&icon_color=%23E7E7E7&title=Views&edge_flat=false)](https://hits.seeyoufarm.com)
 
 **The ultimate all-in-one script for movement, defense, object manipulation, and utility.**
