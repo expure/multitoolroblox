@@ -101,5 +101,5 @@ Join our community for news, support, and updates:
 This project is open-sourced under the **MIT License**. See the `LICENSE` file for details.
 
 ---
-**Created by EXVS – Unmatched movement. Total control.**
+**Created by EXVS**
 ```
