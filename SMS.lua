@@ -41,7 +41,7 @@ stroke.Transparency = 0.3
 stroke.Parent = frame
 
 local title = Instance.new("TextLabel")
-title.Text = "Speed Tool"
+title.Text = "Strongman GUI"
 title.Size = UDim2.new(1, 0, 0, 28)
 title.Position = UDim2.new(0, 0, 0, 0)
 title.BackgroundTransparency = 1
