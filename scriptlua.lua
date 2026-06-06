@@ -10,6 +10,10 @@ local supportedGames = {
     [6961824067] = {
         url = "https://raw.githubusercontent.com/expure/multitoolroblox/refs/heads/main/FTAP.lua",
         name = "FTAP"
+    },
+    [6766156863] = {
+        url = "https://raw.githubusercontent.com/expure/multitoolroblox/refs/heads/main/SMS.lua",
+        name = "Strongman"
     }
 }
 
