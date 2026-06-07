@@ -3,7 +3,7 @@ local activeHooks = {}
 local isBypassActive = false
 local lastValidPos = nil
 local restoreThread = nil
-local velocityOverride = nil
+local teleportBlockCount = 0
 
 local function canUseMetatables()
     local success, mt = pcall(getrawmetatable, game)
@@ -13,38 +13,35 @@ end
 local useAdvanced = canUseMetatables()
 
 local function restorePositionLoop()
+    local hrp = nil
+    local lastForcePos = nil
     while isBypassActive do
-        task.wait(0.03)
-        local hrp = game.Players.LocalPlayer.Character and game.Players.LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-        if hrp and lastValidPos then
+        task.wait(0.02)
+        hrp = game.Players.LocalPlayer.Character and game.Players.LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+        if hrp then
+            if not lastValidPos then
+                lastValidPos = hrp.Position
+                lastForcePos = hrp.Position
+            end
             local currentPos = hrp.Position
             local dist = (currentPos - lastValidPos).Magnitude
-            if dist > 10 then
+            if dist > 5 then
+                teleportBlockCount = teleportBlockCount + 1
                 hrp.CFrame = CFrame.new(lastValidPos)
-                hrp.Velocity = Vector3.new(0, hrp.Velocity.Y, 0)
-                if velocityOverride then
-                    velocityOverride.Velocity = Vector3.new(0, hrp.Velocity.Y, 0)
+                hrp.Velocity = Vector3.new(hrp.Velocity.X, math.clamp(hrp.Velocity.Y, -30, 30), hrp.Velocity.Z)
+                if hrp:FindFirstChild("BodyVelocity") then
+                    hrp.BodyVelocity.Velocity = Vector3.new(0, 0, 0)
                 end
-            elseif dist > 2 then
-                hrp.CFrame = hrp.CFrame:Lerp(CFrame.new(lastValidPos), 0.8)
-            else
-                lastValidPos = currentPos
-                if velocityOverride then
-                    local limitedVel = Vector3.new(
-                        math.clamp(hrp.Velocity.X, -60, 60),
-                        math.clamp(hrp.Velocity.Y, -60, 60),
-                        math.clamp(hrp.Velocity.Z, -60, 60)
-                    )
-                    velocityOverride.Velocity = limitedVel
+                lastForcePos = lastValidPos
+            elseif dist > 0.5 then
+                if not lastForcePos or (currentPos - lastForcePos).Magnitude > 3 then
+                    lastValidPos = currentPos
+                    lastForcePos = currentPos
                 end
             end
-        elseif hrp and not lastValidPos then
-            lastValidPos = hrp.Position
-            if not velocityOverride and hrp then
-                velocityOverride = Instance.new("BodyVelocity")
-                velocityOverride.MaxForce = Vector3.new(1e9, 1e9, 1e9)
-                velocityOverride.Velocity = Vector3.new(0, 0, 0)
-                velocityOverride.Parent = hrp
+            local vel = hrp.Velocity
+            if math.abs(vel.X) > 60 or math.abs(vel.Z) > 60 then
+                hrp.Velocity = Vector3.new(vel.X * 0.7, math.clamp(vel.Y, -30, 30), vel.Z * 0.7)
             end
         end
     end
@@ -55,12 +52,6 @@ local function setupAntiTeleport()
     local hrp = game.Players.LocalPlayer.Character and game.Players.LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
     if not hrp then return end
     lastValidPos = hrp.Position
-    if not velocityOverride then
-        velocityOverride = Instance.new("BodyVelocity")
-        velocityOverride.MaxForce = Vector3.new(1e9, 1e9, 1e9)
-        velocityOverride.Velocity = Vector3.new(0, 0, 0)
-        velocityOverride.Parent = hrp
-    end
     if restoreThread then coroutine.close(restoreThread) end
     restoreThread = coroutine.create(restorePositionLoop)
     coroutine.resume(restoreThread)
@@ -73,13 +64,14 @@ local function setupAntiTeleport()
             for k, v in pairs(mt) do newmt[k] = v end
             newmt.__newindex = function(self, key, val)
                 if key == "CFrame" or key == "Position" then
+                    teleportBlockCount = teleportBlockCount + 1
                     return nil
                 end
                 if key == "Velocity" then
                     local limited = Vector3.new(
-                        math.clamp(val.X, -50, 50),
-                        math.clamp(val.Y, -50, 50),
-                        math.clamp(val.Z, -50, 50)
+                        math.clamp(val.X, -55, 55),
+                        math.clamp(val.Y, -55, 55),
+                        math.clamp(val.Z, -55, 55)
                     )
                     if oldNew then return oldNew(self, key, limited) else rawset(self, key, limited) end
                 end
@@ -103,28 +95,17 @@ end
 local function removeAntiTeleport()
     if not activeHooks.antiTeleport then return end
     if restoreThread then coroutine.close(restoreThread) restoreThread = nil end
-    if velocityOverride then velocityOverride:Destroy() velocityOverride = nil end
-    if useAdvanced then
-        local hrp = game.Players.LocalPlayer.Character and game.Players.LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-        if hrp then
-            local mt = getrawmetatable(hrp)
-            if mt then
-                local restored = {}
-                for k, v in pairs(mt) do restored[k] = v end
-                pcall(setrawmetatable, hrp, restored)
-            end
-        end
-    end
     activeHooks.antiTeleport = false
     lastValidPos = nil
+    teleportBlockCount = 0
 end
 
 local function setupFlyBypass()
     if activeHooks.flyBypass then return end
     local humanoid = game.Players.LocalPlayer.Character and game.Players.LocalPlayer.Character:FindFirstChild("Humanoid")
-    if humanoid and useAdvanced then
+    if humanoid then
         local mt = getrawmetatable(humanoid)
-        if mt then
+        if mt and useAdvanced then
             local newmt = {}
             for k, v in pairs(mt) do newmt[k] = v end
             newmt.__index = function(self, key)
@@ -134,9 +115,22 @@ local function setupFlyBypass()
                 if key == "PlatformStand" then
                     return false
                 end
+                if key == "Jump" then
+                    return function() return nil end
+                end
                 return mt.__index(self, key)
             end
             pcall(setrawmetatable, humanoid, newmt)
+        end
+        local oldState = humanoid.GetState
+        if oldState then
+            hookfunction(humanoid.GetState, function(self)
+                local state = oldState(self)
+                if state == Enum.HumanoidStateType.Freefall or state == Enum.HumanoidStateType.Jumping then
+                    return Enum.HumanoidStateType.Running
+                end
+                return state
+            end)
         end
     end
     activeHooks.flyBypass = true
@@ -208,8 +202,6 @@ end
 local function setupViolationBlock()
     if activeHooks.violationBlock then return end
     local targetTables = {_G, getgenv()}
-    local renv = getrenv()
-    if renv and type(renv) == "table" then table.insert(targetTables, renv) end
     for _, tbl in ipairs(targetTables) do
         if tbl and type(tbl) == "table" and not activeHooks["vb_" .. tostring(tbl)] then
             local success, mt = pcall(getrawmetatable, tbl)
@@ -239,8 +231,6 @@ end
 local function removeViolationBlock()
     if not activeHooks.violationBlock then return end
     local targetTables = {_G, getgenv()}
-    local renv = getrenv()
-    if renv and type(renv) == "table" then table.insert(targetTables, renv) end
     for _, tbl in ipairs(targetTables) do
         local key = "vb_" .. tostring(tbl)
         if tbl and activeHooks[key] then
@@ -265,7 +255,7 @@ local function setupCharacterHook()
     local plr = game.Players.LocalPlayer
     local conn
     conn = plr.CharacterAdded:Connect(function(char)
-        task.wait(0.3)
+        task.wait(0.5)
         if isBypassActive then
             removeAntiTeleport()
             removeFlyBypass()
