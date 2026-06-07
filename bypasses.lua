@@ -3,6 +3,10 @@ local originalFunctions = {}
 local originalMetatables = {}
 local activeHooks = {}
 local isBypassActive = false
+local spoofedPosition = nil
+local spoofedVelocity = nil
+local lastRealPos = nil
+local lastRealVel = nil
 
 local function canUseBypasses()
     local success, rawmeta = pcall(getrawmetatable, game)
@@ -22,8 +26,24 @@ local function safeUnhookFunction(target, original)
     if original then pcall(hookfunction, target, original) end
 end
 
+local function updateSpoofedPosition()
+    local hrp = game.Players.LocalPlayer.Character and game.Players.LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    if hrp then
+        local realPos = hrp.Position
+        if not lastRealPos then lastRealPos = realPos end
+        local delta = (realPos - lastRealPos) * 0.95
+        if spoofedPosition then
+            spoofedPosition = spoofedPosition + delta
+        else
+            spoofedPosition = realPos
+        end
+        lastRealPos = realPos
+    end
+end
+
 local originalGetState = nil
 local originalFloorMaterial = nil
+local originalPlatformStand = nil
 
 local function setupFlyBypass()
     if activeHooks.flyBypass then return end
@@ -37,6 +57,7 @@ local function setupFlyBypass()
         return state
     end)
     originalFloorMaterial = safeHookFunction(humanoid.FloorMaterial, function(self) return Enum.Material.Grass end)
+    originalPlatformStand = safeHookFunction(humanoid.PlatformStand, function(self) return false end)
     activeHooks.flyBypass = true
 end
 
@@ -46,6 +67,7 @@ local function removeFlyBypass()
     if humanoid then
         if originalGetState then safeUnhookFunction(humanoid.GetState, originalGetState) originalGetState = nil end
         if originalFloorMaterial then safeUnhookFunction(humanoid.FloorMaterial, originalFloorMaterial) originalFloorMaterial = nil end
+        if originalPlatformStand then safeUnhookFunction(humanoid.PlatformStand, originalPlatformStand) originalPlatformStand = nil end
     end
     activeHooks.flyBypass = false
 end
@@ -56,7 +78,9 @@ local function setupAntiKickTeleport()
     if activeHooks.antiKick then return end
     local localPlayer = game.Players.LocalPlayer
     if localPlayer and localPlayer.Kick then
-        originalKick = safeHookFunction(localPlayer.Kick, function(self, message) return nil end)
+        originalKick = safeHookFunction(localPlayer.Kick, function(self, message)
+            return nil
+        end)
     end
     activeHooks.antiKick = true
 end
@@ -68,23 +92,28 @@ local function removeAntiKickTeleport()
     activeHooks.antiKick = false
 end
 
-local spoofedPosition = nil
-local spoofedVelocity = nil
-
 local function setupPositionSpoofing()
     if activeHooks.positionSpoof then return end
     local hrp = game.Players.LocalPlayer.Character and game.Players.LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
     if not hrp then return end
     spoofedPosition = hrp.Position
     spoofedVelocity = Vector3.new(0,0,0)
+    lastRealPos = hrp.Position
+    lastRealVel = hrp.Velocity
     local mt = getrawmetatable(hrp)
     originalMetatables["HRP_INDEX"] = mt.__index
     local newmt = {}
     for k,v in pairs(mt) do newmt[k] = v end
     newmt.__index = function(self, key)
-        if key == "Position" then return spoofedPosition
-        elseif key == "Velocity" then return spoofedVelocity end
-        if originalMetatables["HRP_INDEX"] then return originalMetatables["HRP_INDEX"](self, key) end
+        if key == "Position" then
+            updateSpoofedPosition()
+            return spoofedPosition
+        elseif key == "Velocity" then
+            return spoofedVelocity
+        end
+        if originalMetatables["HRP_INDEX"] then
+            return originalMetatables["HRP_INDEX"](self, key)
+        end
         return nil
     end
     pcall(setrawmetatable, hrp, newmt)
@@ -103,6 +132,8 @@ local function removePositionSpoofing()
         originalMetatables["HRP_INDEX"] = nil
     end
     activeHooks.positionSpoof = false
+    spoofedPosition = nil
+    spoofedVelocity = nil
 end
 
 local function setupViolationBlock()
@@ -114,7 +145,8 @@ local function setupViolationBlock()
             if success and mt then
                 originalMetatables[tbl] = {
                     mt = mt,
-                    oldNewIndex = mt.__newindex
+                    oldNewIndex = mt.__newindex,
+                    oldIndex = mt.__index
                 }
                 local newmt = {}
                 for k,v in pairs(mt) do newmt[k] = v end
@@ -127,6 +159,17 @@ local function setupViolationBlock()
                         return data.oldNewIndex(self, key, value)
                     else
                         rawset(self, key, value)
+                    end
+                end
+                newmt.__index = function(self, key)
+                    if type(key) == "string" and (string.lower(key):find("violation") or string.lower(key):find("flag") or string.lower(key):find("cheat") or string.lower(key):find("detect")) then
+                        return nil
+                    end
+                    local data = originalMetatables[tbl]
+                    if data and data.oldIndex then
+                        return data.oldIndex(self, key)
+                    else
+                        return rawget(self, key)
                     end
                 end
                 pcall(setrawmetatable, tbl, newmt)
@@ -156,6 +199,7 @@ local scriptVariables = {
     "EXVS_Loaded", "ESP_Enabled", "FlySpeed"
 }
 local originalGlobals = {}
+local originalPairs = nil
 
 local function setupCheckEvasion()
     if activeHooks.checkEvasion then return end
@@ -173,6 +217,22 @@ local function setupCheckEvasion()
     end
     hideVariables(_G)
     hideVariables(getgenv())
+    originalPairs = safeHookFunction(pairs, function(tbl)
+        if tbl == _G or tbl == getgenv() then
+            local filtered = {}
+            for k, v in originalPairs(tbl) do
+                local shouldHide = false
+                for _, name in ipairs(scriptVariables) do
+                    if k == name then shouldHide = true break end
+                end
+                if not shouldHide then
+                    filtered[k] = v
+                end
+            end
+            return next, filtered, nil
+        end
+        return originalPairs(tbl)
+    end)
     activeHooks.checkEvasion = true
 end
 
@@ -180,6 +240,10 @@ local function removeCheckEvasion()
     if not activeHooks.checkEvasion then return end
     for varName, originalValue in pairs(originalGlobals) do _G[varName] = originalValue end
     originalGlobals = {}
+    if originalPairs then
+        safeUnhookFunction(pairs, originalPairs)
+        originalPairs = nil
+    end
     activeHooks.checkEvasion = false
 end
 
@@ -223,7 +287,8 @@ end
 function BypassModule.isEnabled() return isBypassActive end
 
 function BypassModule.updateSpoofedPosition(pos)
-    if pos then spoofedPosition = pos
+    if pos then
+        spoofedPosition = pos
     else
         local hrp = game.Players.LocalPlayer.Character and game.Players.LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
         if hrp then spoofedPosition = hrp.Position end
