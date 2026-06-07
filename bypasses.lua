@@ -3,6 +3,7 @@ local activeHooks = {}
 local isBypassActive = false
 local lastValidPos = nil
 local restoreThread = nil
+local velocityOverride = nil
 
 local function canUseMetatables()
     local success, mt = pcall(getrawmetatable, game)
@@ -13,61 +14,85 @@ local useAdvanced = canUseMetatables()
 
 local function restorePositionLoop()
     while isBypassActive do
-        task.wait(0.05)
+        task.wait(0.03)
         local hrp = game.Players.LocalPlayer.Character and game.Players.LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
         if hrp and lastValidPos then
             local currentPos = hrp.Position
             local dist = (currentPos - lastValidPos).Magnitude
-            if dist > 15 then
+            if dist > 10 then
                 hrp.CFrame = CFrame.new(lastValidPos)
                 hrp.Velocity = Vector3.new(0, hrp.Velocity.Y, 0)
-            elseif dist > 3 then
-                hrp.CFrame = hrp.CFrame:Lerp(CFrame.new(lastValidPos), 0.7)
+                if velocityOverride then
+                    velocityOverride.Velocity = Vector3.new(0, hrp.Velocity.Y, 0)
+                end
+            elseif dist > 2 then
+                hrp.CFrame = hrp.CFrame:Lerp(CFrame.new(lastValidPos), 0.8)
             else
                 lastValidPos = currentPos
+                if velocityOverride then
+                    local limitedVel = Vector3.new(
+                        math.clamp(hrp.Velocity.X, -60, 60),
+                        math.clamp(hrp.Velocity.Y, -60, 60),
+                        math.clamp(hrp.Velocity.Z, -60, 60)
+                    )
+                    velocityOverride.Velocity = limitedVel
+                end
             end
         elseif hrp and not lastValidPos then
             lastValidPos = hrp.Position
+            if not velocityOverride and hrp then
+                velocityOverride = Instance.new("BodyVelocity")
+                velocityOverride.MaxForce = Vector3.new(1e9, 1e9, 1e9)
+                velocityOverride.Velocity = Vector3.new(0, 0, 0)
+                velocityOverride.Parent = hrp
+            end
         end
     end
 end
-
-local originalNewIndex = nil
-local originalIndex = nil
 
 local function setupAntiTeleport()
     if activeHooks.antiTeleport then return end
     local hrp = game.Players.LocalPlayer.Character and game.Players.LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
     if not hrp then return end
     lastValidPos = hrp.Position
+    if not velocityOverride then
+        velocityOverride = Instance.new("BodyVelocity")
+        velocityOverride.MaxForce = Vector3.new(1e9, 1e9, 1e9)
+        velocityOverride.Velocity = Vector3.new(0, 0, 0)
+        velocityOverride.Parent = hrp
+    end
     if restoreThread then coroutine.close(restoreThread) end
     restoreThread = coroutine.create(restorePositionLoop)
     coroutine.resume(restoreThread)
     if useAdvanced then
         local mt = getrawmetatable(hrp)
         if mt then
-            originalNewIndex = mt.__newindex
-            originalIndex = mt.__index
+            local oldNew = mt.__newindex
+            local oldIdx = mt.__index
             local newmt = {}
             for k, v in pairs(mt) do newmt[k] = v end
             newmt.__newindex = function(self, key, val)
                 if key == "CFrame" or key == "Position" then
                     return nil
                 end
-                if originalNewIndex then
-                    return originalNewIndex(self, key, val)
-                else
-                    rawset(self, key, val)
+                if key == "Velocity" then
+                    local limited = Vector3.new(
+                        math.clamp(val.X, -50, 50),
+                        math.clamp(val.Y, -50, 50),
+                        math.clamp(val.Z, -50, 50)
+                    )
+                    if oldNew then return oldNew(self, key, limited) else rawset(self, key, limited) end
                 end
+                if oldNew then return oldNew(self, key, val) else rawset(self, key, val) end
             end
             newmt.__index = function(self, key)
                 if key == "Position" then
-                    return lastValidPos or (originalIndex and originalIndex(self, key) or self.Position)
+                    return lastValidPos or (oldIdx and oldIdx(self, key) or self.Position)
                 end
                 if key == "Velocity" then
-                    return Vector3.new(0,0,0)
+                    return Vector3.new(0, 0, 0)
                 end
-                return originalIndex and originalIndex(self, key) or rawget(self, key)
+                return oldIdx and oldIdx(self, key) or rawget(self, key)
             end
             pcall(setrawmetatable, hrp, newmt)
         end
@@ -78,6 +103,7 @@ end
 local function removeAntiTeleport()
     if not activeHooks.antiTeleport then return end
     if restoreThread then coroutine.close(restoreThread) restoreThread = nil end
+    if velocityOverride then velocityOverride:Destroy() velocityOverride = nil end
     if useAdvanced then
         local hrp = game.Players.LocalPlayer.Character and game.Players.LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
         if hrp then
@@ -85,48 +111,12 @@ local function removeAntiTeleport()
             if mt then
                 local restored = {}
                 for k, v in pairs(mt) do restored[k] = v end
-                restored.__newindex = originalNewIndex
-                restored.__index = originalIndex
                 pcall(setrawmetatable, hrp, restored)
             end
         end
     end
-    originalNewIndex = nil
-    originalIndex = nil
     activeHooks.antiTeleport = false
     lastValidPos = nil
-end
-
-local function setupSpeedBypass()
-    if activeHooks.speedBypass then return end
-    local hrp = game.Players.LocalPlayer.Character and game.Players.LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-    if not hrp then return end
-    if useAdvanced then
-        local mt = getrawmetatable(hrp)
-        if mt and mt.__newindex then
-            local oldNew = mt.__newindex
-            local newmt = {}
-            for k, v in pairs(mt) do newmt[k] = v end
-            newmt.__newindex = function(self, key, val)
-                if key == "Velocity" then
-                    local limited = Vector3.new(
-                        math.clamp(val.X, -60, 60),
-                        math.clamp(val.Y, -60, 60),
-                        math.clamp(val.Z, -60, 60)
-                    )
-                    return oldNew(self, key, limited)
-                end
-                return oldNew(self, key, val)
-            end
-            pcall(setrawmetatable, hrp, newmt)
-        end
-    end
-    activeHooks.speedBypass = true
-end
-
-local function removeSpeedBypass()
-    if not activeHooks.speedBypass then return end
-    activeHooks.speedBypass = false
 end
 
 local function setupFlyBypass()
@@ -140,6 +130,9 @@ local function setupFlyBypass()
             newmt.__index = function(self, key)
                 if key == "FloorMaterial" then
                     return Enum.Material.Grass
+                end
+                if key == "PlatformStand" then
+                    return false
                 end
                 return mt.__index(self, key)
             end
@@ -275,11 +268,9 @@ local function setupCharacterHook()
         task.wait(0.3)
         if isBypassActive then
             removeAntiTeleport()
-            removeSpeedBypass()
             removeFlyBypass()
             task.wait(0.1)
             setupAntiTeleport()
-            setupSpeedBypass()
             setupFlyBypass()
         end
     end)
@@ -296,7 +287,6 @@ end
 function BypassModule.enable()
     if isBypassActive then return true end
     setupAntiTeleport()
-    setupSpeedBypass()
     setupFlyBypass()
     setupAntiKickTransfer()
     setupHideGlobals()
@@ -309,7 +299,6 @@ end
 function BypassModule.disable()
     if not isBypassActive then return end
     removeAntiTeleport()
-    removeSpeedBypass()
     removeFlyBypass()
     removeAntiKickTransfer()
     removeHideGlobals()
