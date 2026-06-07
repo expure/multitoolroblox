@@ -3,6 +3,13 @@ local activeHooks = {}
 local isBypassActive = false
 local lastValidPos = nil
 local restoreThread = nil
+local originalGetState = nil
+local originalKick = nil
+local originalTeleport = nil
+local originalFloorMaterial = nil
+local savedGlobals = {}
+local scriptVars = {"FullBrightEnabled", "FullBrightExecuted", "InfiniteJumpEnabled", "NormalLightingSettings", "flingRotateTask", "FlyEnabled", "Speed", "EXVS_Loaded", "ESP_Enabled", "FlySpeed"}
+local characterAddedConn = nil
 
 local useAdvanced = pcall(getrawmetatable, game)
 
@@ -70,30 +77,32 @@ local function removeAntiTeleport()
     lastValidPos = nil
 end
 
-local originalGetState = nil
-
 local function setupFlyBypass()
     if activeHooks.flyBypass then return end
     local humanoid = game.Players.LocalPlayer.Character and game.Players.LocalPlayer.Character:FindFirstChild("Humanoid")
     if humanoid then
-        originalGetState = hookfunction(humanoid.GetState, function(self)
-            local state = originalGetState(self)
-            if state == Enum.HumanoidStateType.Freefall or state == Enum.HumanoidStateType.Jumping then
-                return Enum.HumanoidStateType.Running
-            end
-            return state
-        end)
-        local mt = getrawmetatable(humanoid)
-        if mt and useAdvanced then
-            local newmt = {}
-            for k, v in pairs(mt) do newmt[k] = v end
-            newmt.__index = function(self, key)
-                if key == "FloorMaterial" then
-                    return Enum.Material.Grass
+        if humanoid.GetState then
+            originalGetState = hookfunction(humanoid.GetState, function(self)
+                local state = originalGetState(self)
+                if state == Enum.HumanoidStateType.Freefall or state == Enum.HumanoidStateType.Jumping then
+                    return Enum.HumanoidStateType.Running
                 end
-                return mt.__index(self, key)
+                return state
+            end)
+        end
+        if useAdvanced then
+            local mt = getrawmetatable(humanoid)
+            if mt then
+                local newmt = {}
+                for k, v in pairs(mt) do newmt[k] = v end
+                newmt.__index = function(self, key)
+                    if key == "FloorMaterial" then
+                        return Enum.Material.Grass
+                    end
+                    return mt.__index(self, key)
+                end
+                pcall(setrawmetatable, humanoid, newmt)
             end
-            pcall(setrawmetatable, humanoid, newmt)
         end
     end
     activeHooks.flyBypass = true
@@ -103,14 +112,11 @@ local function removeFlyBypass()
     if not activeHooks.flyBypass then return end
     local humanoid = game.Players.LocalPlayer.Character and game.Players.LocalPlayer.Character:FindFirstChild("Humanoid")
     if humanoid and originalGetState then
-        hookfunction(humanoid.GetState, originalGetState)
+        pcall(hookfunction, humanoid.GetState, originalGetState)
         originalGetState = nil
     end
     activeHooks.flyBypass = false
 end
-
-local originalKick = nil
-local originalTeleport = nil
 
 local function setupAntiKickTransfer()
     if activeHooks.antiKickTransfer then return end
@@ -128,14 +134,11 @@ end
 local function removeAntiKickTransfer()
     if not activeHooks.antiKickTransfer then return end
     local localPlayer = game.Players.LocalPlayer
-    if localPlayer and originalKick then hookfunction(localPlayer.Kick, originalKick) end
+    if localPlayer and originalKick then pcall(hookfunction, localPlayer.Kick, originalKick) end
     local ts = game:GetService("TeleportService")
-    if ts and originalTeleport then hookfunction(ts.Teleport, originalTeleport) end
+    if ts and originalTeleport then pcall(hookfunction, ts.Teleport, originalTeleport) end
     activeHooks.antiKickTransfer = false
 end
-
-local scriptVars = {"FullBrightEnabled", "FullBrightExecuted", "InfiniteJumpEnabled", "NormalLightingSettings", "flingRotateTask", "FlyEnabled", "Speed", "EXVS_Loaded", "ESP_Enabled", "FlySpeed"}
-local savedGlobals = {}
 
 local function setupHideGlobals()
     if activeHooks.hideGlobals then return end
@@ -216,8 +219,6 @@ local function removeViolationBlock()
     end
     activeHooks.violationBlock = false
 end
-
-local characterAddedConn = nil
 
 local function setupCharacterHook()
     if activeHooks.characterHook then return end
