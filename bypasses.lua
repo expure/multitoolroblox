@@ -11,13 +11,14 @@ local function canUseBypasses()
 end
 
 local function safeHookFunction(target, hook)
+    if not target then return nil end
     local success, original = pcall(hookfunction, target, hook)
     if success then return original end
     return nil
 end
 
 local function safeUnhookFunction(target, original)
-    if original then pcall(hookfunction, target, original) end
+    if target and original then pcall(hookfunction, target, original) end
 end
 
 local originalGetState = nil
@@ -68,13 +69,15 @@ end
 
 local spoofedPosition = nil
 local spoofedVelocity = nil
+local hrpIndexBackup = nil
 
 local function setupPositionSpoofing()
     if activeHooks.positionSpoof then return end
     local hrp = game.Players.LocalPlayer.Character and game.Players.LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
     if not hrp then return end
-    local mt = getrawmetatable(hrp)
-    if not mt then return end
+    local success, mt = pcall(getrawmetatable, hrp)
+    if not success or not mt then return end
+    hrpIndexBackup = mt.__index
     spoofedPosition = hrp.Position
     spoofedVelocity = Vector3.new(0,0,0)
     local newmt = {}
@@ -82,7 +85,8 @@ local function setupPositionSpoofing()
     newmt.__index = function(self, key)
         if key == "Position" then return spoofedPosition end
         if key == "Velocity" then return spoofedVelocity end
-        return mt.__index(self, key)
+        if hrpIndexBackup then return hrpIndexBackup(self, key) end
+        return nil
     end
     pcall(setrawmetatable, hrp, newmt)
     activeHooks.positionSpoof = true
@@ -92,15 +96,15 @@ local function removePositionSpoofing()
     if not activeHooks.positionSpoof then return end
     local hrp = game.Players.LocalPlayer.Character and game.Players.LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
     if hrp then
-        local mt = getrawmetatable(hrp)
-        if mt and mt.__index then
-            local originalIndex = mt.__index
+        local success, mt = pcall(getrawmetatable, hrp)
+        if success and mt then
             local restored = {}
             for k, v in pairs(mt) do restored[k] = v end
-            restored.__index = originalIndex
+            if hrpIndexBackup then restored.__index = hrpIndexBackup end
             pcall(setrawmetatable, hrp, restored)
         end
     end
+    hrpIndexBackup = nil
     activeHooks.positionSpoof = false
     spoofedPosition = nil
     spoofedVelocity = nil
@@ -142,9 +146,11 @@ end
 
 local function setupViolationBlock()
     if activeHooks.violationBlock then return end
-    local targetTables = {_G, getgenv(), getrenv()}
+    local targetTables = {_G, getgenv()}
+    local renv = getrenv()
+    if renv and type(renv) == "table" then table.insert(targetTables, renv) end
     for _, tbl in ipairs(targetTables) do
-        if tbl and not rawget(activeHooks, "vb_" .. tostring(tbl)) then
+        if tbl and type(tbl) == "table" and not activeHooks["vb_" .. tostring(tbl)] then
             local success, mt = pcall(getrawmetatable, tbl)
             if success and mt then
                 local newmt = {}
@@ -171,12 +177,14 @@ end
 
 local function removeViolationBlock()
     if not activeHooks.violationBlock then return end
-    local targetTables = {_G, getgenv(), getrenv()}
+    local targetTables = {_G, getgenv()}
+    local renv = getrenv()
+    if renv and type(renv) == "table" then table.insert(targetTables, renv) end
     for _, tbl in ipairs(targetTables) do
         local key = "vb_" .. tostring(tbl)
         if tbl and activeHooks[key] then
             local success, mt = pcall(getrawmetatable, tbl)
-            if success and mt and mt.__newindex then
+            if success and mt then
                 local restored = {}
                 for k, v in pairs(mt) do restored[k] = v end
                 restored.__newindex = nil
@@ -188,6 +196,8 @@ local function removeViolationBlock()
     end
     activeHooks.violationBlock = false
 end
+
+local characterAddedConn = nil
 
 local function setupCharacterHook()
     if activeHooks.characterHook then return end
