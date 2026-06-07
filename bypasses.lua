@@ -18,6 +18,8 @@ local function restorePositionLoop()
                 hrp.Velocity = Vector3.new(0, hrp.Velocity.Y, 0)
             elseif dist > 1.5 then
                 hrp.CFrame = hrp.CFrame:Lerp(CFrame.new(lastValidPos), 0.6)
+            else
+                lastValidPos = currentPos
             end
         elseif hrp and not lastValidPos then
             lastValidPos = hrp.Position
@@ -68,25 +70,42 @@ local function removeAntiTeleport()
     lastValidPos = nil
 end
 
+local originalGetState = nil
+
 local function setupFlyBypass()
     if activeHooks.flyBypass then return end
     local humanoid = game.Players.LocalPlayer.Character and game.Players.LocalPlayer.Character:FindFirstChild("Humanoid")
     if humanoid then
-        local oldState = humanoid.GetState
-        local oldFloor = humanoid.FloorMaterial
-        hookfunction(humanoid.GetState, function(self)
-            local state = oldState(self)
+        originalGetState = hookfunction(humanoid.GetState, function(self)
+            local state = originalGetState(self)
             if state == Enum.HumanoidStateType.Freefall or state == Enum.HumanoidStateType.Jumping then
                 return Enum.HumanoidStateType.Running
             end
             return state
         end)
-        hookfunction(humanoid.FloorMaterial, function(self) return Enum.Material.Grass end)
+        local mt = getrawmetatable(humanoid)
+        if mt and useAdvanced then
+            local newmt = {}
+            for k, v in pairs(mt) do newmt[k] = v end
+            newmt.__index = function(self, key)
+                if key == "FloorMaterial" then
+                    return Enum.Material.Grass
+                end
+                return mt.__index(self, key)
+            end
+            pcall(setrawmetatable, humanoid, newmt)
+        end
     end
     activeHooks.flyBypass = true
 end
 
 local function removeFlyBypass()
+    if not activeHooks.flyBypass then return end
+    local humanoid = game.Players.LocalPlayer.Character and game.Players.LocalPlayer.Character:FindFirstChild("Humanoid")
+    if humanoid and originalGetState then
+        hookfunction(humanoid.GetState, originalGetState)
+        originalGetState = nil
+    end
     activeHooks.flyBypass = false
 end
 
