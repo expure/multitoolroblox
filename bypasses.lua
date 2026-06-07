@@ -68,8 +68,6 @@ end
 
 local spoofedPosition = nil
 local spoofedVelocity = nil
-local realPositionGetter = nil
-local realVelocityGetter = nil
 
 local function setupPositionSpoofing()
     if activeHooks.positionSpoof then return end
@@ -77,22 +75,14 @@ local function setupPositionSpoofing()
     if not hrp then return end
     local mt = getrawmetatable(hrp)
     if not mt then return end
-    realPositionGetter = mt.__index
-    realVelocityGetter = mt.__index
     spoofedPosition = hrp.Position
     spoofedVelocity = Vector3.new(0,0,0)
     local newmt = {}
     for k, v in pairs(mt) do newmt[k] = v end
     newmt.__index = function(self, key)
-        if key == "Position" then
-            return spoofedPosition
-        elseif key == "Velocity" then
-            return spoofedVelocity
-        end
-        if realPositionGetter then
-            return realPositionGetter(self, key)
-        end
-        return nil
+        if key == "Position" then return spoofedPosition end
+        if key == "Velocity" then return spoofedVelocity end
+        return mt.__index(self, key)
     end
     pcall(setrawmetatable, hrp, newmt)
     activeHooks.positionSpoof = true
@@ -103,74 +93,17 @@ local function removePositionSpoofing()
     local hrp = game.Players.LocalPlayer.Character and game.Players.LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
     if hrp then
         local mt = getrawmetatable(hrp)
-        if mt then
+        if mt and mt.__index then
+            local originalIndex = mt.__index
             local restored = {}
             for k, v in pairs(mt) do restored[k] = v end
-            if realPositionGetter then restored.__index = realPositionGetter end
+            restored.__index = originalIndex
             pcall(setrawmetatable, hrp, restored)
         end
     end
     activeHooks.positionSpoof = false
     spoofedPosition = nil
     spoofedVelocity = nil
-end
-
-local function updateSpoofedPosition(pos)
-    if pos then spoofedPosition = pos
-    else
-        local hrp = game.Players.LocalPlayer.Character and game.Players.LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-        if hrp and realPositionGetter then
-            spoofedPosition = realPositionGetter(hrp, "Position")
-        end
-    end
-end
-
-local function updateSpoofedVelocity(vel)
-    if vel then spoofedVelocity = vel else spoofedVelocity = Vector3.new(0,0,0) end
-end
-
-local function setupViolationBlock()
-    if activeHooks.violationBlock then return end
-    local targetTables = {_G, getgenv(), getrenv()}
-    for _, tbl in ipairs(targetTables) do
-        if tbl and not rawget(activeHooks, "violationBlock_" .. tostring(tbl)) then
-            local success, mt = pcall(getrawmetatable, tbl)
-            if success and mt then
-                local oldNew = mt.__newindex
-                local oldIdx = mt.__index
-                local newmt = {}
-                for k, v in pairs(mt) do newmt[k] = v end
-                newmt.__newindex = function(self, key, val)
-                    if type(key) == "string" and (key:lower():find("violation") or key:lower():find("flag") or key:lower():find("cheat") or key:lower():find("detect")) then
-                        return nil
-                    end
-                    if oldNew then return oldNew(self, key, val) else rawset(self, key, val) end
-                end
-                newmt.__index = function(self, key)
-                    if type(key) == "string" and (key:lower():find("violation") or key:lower():find("flag") or key:lower():find("cheat") or key:lower():find("detect")) then
-                        return nil
-                    end
-                    if oldIdx then return oldIdx(self, key) else return rawget(self, key) end
-                end
-                pcall(setrawmetatable, tbl, newmt)
-                activeHooks["violationBlock_" .. tostring(tbl)] = {oldNew = oldNew, oldIdx = oldIdx, mt = mt}
-            end
-        end
-    end
-    activeHooks.violationBlock = true
-end
-
-local function removeViolationBlock()
-    if not activeHooks.violationBlock then return end
-    local targetTables = {_G, getgenv(), getrenv()}
-    for _, tbl in ipairs(targetTables) do
-        local key = "violationBlock_" .. tostring(tbl)
-        if tbl and activeHooks[key] then
-            pcall(setrawmetatable, tbl, activeHooks[key].mt)
-            activeHooks[key] = nil
-        end
-    end
-    activeHooks.violationBlock = false
 end
 
 local scriptVars = {"FullBrightEnabled", "FullBrightExecuted", "InfiniteJumpEnabled", "NormalLightingSettings", "flingRotateTask", "FlyEnabled", "Speed", "EXVS_Loaded", "ESP_Enabled", "FlySpeed"}
@@ -207,6 +140,55 @@ local function removeHideGlobals()
     activeHooks.hideGlobals = false
 end
 
+local function setupViolationBlock()
+    if activeHooks.violationBlock then return end
+    local targetTables = {_G, getgenv(), getrenv()}
+    for _, tbl in ipairs(targetTables) do
+        if tbl and not rawget(activeHooks, "vb_" .. tostring(tbl)) then
+            local success, mt = pcall(getrawmetatable, tbl)
+            if success and mt then
+                local newmt = {}
+                for k, v in pairs(mt) do newmt[k] = v end
+                newmt.__newindex = function(self, key, val)
+                    if type(key) == "string" and (key:lower():find("violation") or key:lower():find("flag") or key:lower():find("cheat") or key:lower():find("detect")) then
+                        return nil
+                    end
+                    rawset(self, key, val)
+                end
+                newmt.__index = function(self, key)
+                    if type(key) == "string" and (key:lower():find("violation") or key:lower():find("flag") or key:lower():find("cheat") or key:lower():find("detect")) then
+                        return nil
+                    end
+                    return rawget(self, key)
+                end
+                pcall(setrawmetatable, tbl, newmt)
+                activeHooks["vb_" .. tostring(tbl)] = true
+            end
+        end
+    end
+    activeHooks.violationBlock = true
+end
+
+local function removeViolationBlock()
+    if not activeHooks.violationBlock then return end
+    local targetTables = {_G, getgenv(), getrenv()}
+    for _, tbl in ipairs(targetTables) do
+        local key = "vb_" .. tostring(tbl)
+        if tbl and activeHooks[key] then
+            local success, mt = pcall(getrawmetatable, tbl)
+            if success and mt and mt.__newindex then
+                local restored = {}
+                for k, v in pairs(mt) do restored[k] = v end
+                restored.__newindex = nil
+                restored.__index = nil
+                pcall(setrawmetatable, tbl, restored)
+            end
+            activeHooks[key] = nil
+        end
+    end
+    activeHooks.violationBlock = false
+end
+
 local function setupCharacterHook()
     if activeHooks.characterHook then return end
     local plr = game.Players.LocalPlayer
@@ -240,8 +222,8 @@ function BypassModule.enable()
     setupFlyBypass()
     setupAntiKick()
     setupPositionSpoofing()
-    setupViolationBlock()
     setupHideGlobals()
+    setupViolationBlock()
     setupCharacterHook()
     isBypassActive = true
     return true
@@ -252,14 +234,22 @@ function BypassModule.disable()
     removeFlyBypass()
     removeAntiKick()
     removePositionSpoofing()
-    removeViolationBlock()
     removeHideGlobals()
+    removeViolationBlock()
     removeCharacterHook()
     isBypassActive = false
 end
 
 function BypassModule.isEnabled() return isBypassActive end
-function BypassModule.updateSpoofedPosition(pos) updateSpoofedPosition(pos) end
-function BypassModule.updateSpoofedVelocity(vel) updateSpoofedVelocity(vel) end
+function BypassModule.updateSpoofedPosition(pos)
+    if pos then spoofedPosition = pos
+    else
+        local hrp = game.Players.LocalPlayer.Character and game.Players.LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+        if hrp then spoofedPosition = hrp.Position end
+    end
+end
+function BypassModule.updateSpoofedVelocity(vel)
+    if vel then spoofedVelocity = vel else spoofedVelocity = Vector3.new(0,0,0) end
+end
 
 return BypassModule
