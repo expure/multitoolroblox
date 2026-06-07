@@ -23,65 +23,116 @@ end
 
 local originalGetState = nil
 local originalFloorMaterial = nil
+local originalVelocityWrite = nil
 
-local function setupFlyBypass()
-    if activeHooks.flyBypass then return end
+local function setupFlySpeedBypass()
+    if activeHooks.flySpeedBypass then return end
+    local hrp = game.Players.LocalPlayer.Character and game.Players.LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
     local humanoid = game.Players.LocalPlayer.Character and game.Players.LocalPlayer.Character:FindFirstChild("Humanoid")
-    if not humanoid then return end
-    originalGetState = safeHookFunction(humanoid.GetState, function(self)
-        local state = originalGetState(self)
-        if state == Enum.HumanoidStateType.Freefall or state == Enum.HumanoidStateType.Jumping then
-            return Enum.HumanoidStateType.Running
+    if humanoid then
+        originalGetState = safeHookFunction(humanoid.GetState, function(self)
+            local state = originalGetState(self)
+            if state == Enum.HumanoidStateType.Freefall or state == Enum.HumanoidStateType.Jumping then
+                return Enum.HumanoidStateType.Running
+            end
+            return state
+        end)
+        originalFloorMaterial = safeHookFunction(humanoid.FloorMaterial, function(self) return Enum.Material.Grass end)
+    end
+    local mt = getrawmetatable(hrp)
+    if mt and mt.__newindex then
+        originalVelocityWrite = mt.__newindex
+        local newmt = {}
+        for k, v in pairs(mt) do newmt[k] = v end
+        newmt.__newindex = function(self, key, val)
+            if key == "Velocity" then
+                local limited = Vector3.new(
+                    math.clamp(val.X, -50, 50),
+                    math.clamp(val.Y, -50, 50),
+                    math.clamp(val.Z, -50, 50)
+                )
+                return originalVelocityWrite(self, key, limited)
+            end
+            return originalVelocityWrite(self, key, val)
         end
-        return state
-    end)
-    originalFloorMaterial = safeHookFunction(humanoid.FloorMaterial, function(self) return Enum.Material.Grass end)
-    activeHooks.flyBypass = true
+        pcall(setrawmetatable, hrp, newmt)
+    end
+    activeHooks.flySpeedBypass = true
 end
 
-local function removeFlyBypass()
-    if not activeHooks.flyBypass then return end
+local function removeFlySpeedBypass()
+    if not activeHooks.flySpeedBypass then return end
+    local hrp = game.Players.LocalPlayer.Character and game.Players.LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
     local humanoid = game.Players.LocalPlayer.Character and game.Players.LocalPlayer.Character:FindFirstChild("Humanoid")
     if humanoid then
         if originalGetState then safeUnhookFunction(humanoid.GetState, originalGetState) end
         if originalFloorMaterial then safeUnhookFunction(humanoid.FloorMaterial, originalFloorMaterial) end
     end
-    activeHooks.flyBypass = false
+    if hrp and originalVelocityWrite then
+        local mt = getrawmetatable(hrp)
+        if mt then
+            local restored = {}
+            for k, v in pairs(mt) do restored[k] = v end
+            restored.__newindex = originalVelocityWrite
+            pcall(setrawmetatable, hrp, restored)
+        end
+    end
+    activeHooks.flySpeedBypass = false
 end
 
 local originalKick = nil
+local originalTeleport = nil
 
-local function setupAntiKick()
-    if activeHooks.antiKick then return end
+local function setupAntiKickTransfer()
+    if activeHooks.antiKickTransfer then return end
     local localPlayer = game.Players.LocalPlayer
     if localPlayer and localPlayer.Kick then
         originalKick = safeHookFunction(localPlayer.Kick, function() return nil end)
     end
-    activeHooks.antiKick = true
+    local ts = game:GetService("TeleportService")
+    if ts and ts.Teleport then
+        originalTeleport = safeHookFunction(ts.Teleport, function() return nil end)
+    end
+    activeHooks.antiKickTransfer = true
 end
 
-local function removeAntiKick()
-    if not activeHooks.antiKick then return end
+local function removeAntiKickTransfer()
+    if not activeHooks.antiKickTransfer then return end
     local localPlayer = game.Players.LocalPlayer
     if localPlayer and originalKick then safeUnhookFunction(localPlayer.Kick, originalKick) end
-    activeHooks.antiKick = false
+    local ts = game:GetService("TeleportService")
+    if ts and originalTeleport then safeUnhookFunction(ts.Teleport, originalTeleport) end
+    activeHooks.antiKickTransfer = false
 end
 
 local spoofedPosition = nil
 local spoofedVelocity = nil
 local hrpIndexBackup = nil
+local hrpNewIndexBackup = nil
 
-local function setupPositionSpoofing()
-    if activeHooks.positionSpoof then return end
+local function setupAntiTeleport()
+    if activeHooks.antiTeleport then return end
     local hrp = game.Players.LocalPlayer.Character and game.Players.LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
     if not hrp then return end
-    local success, mt = pcall(getrawmetatable, hrp)
-    if not success or not mt then return end
+    local mt = getrawmetatable(hrp)
+    if not mt then return end
     hrpIndexBackup = mt.__index
+    hrpNewIndexBackup = mt.__newindex
     spoofedPosition = hrp.Position
-    spoofedVelocity = Vector3.new(0,0,0)
+    spoofedVelocity = hrp.Velocity
     local newmt = {}
     for k, v in pairs(mt) do newmt[k] = v end
+    newmt.__newindex = function(self, key, val)
+        if key == "CFrame" or key == "Position" then
+            return nil
+        end
+        if hrpNewIndexBackup then
+            return hrpNewIndexBackup(self, key, val)
+        else
+            rawset(self, key, val)
+        end
+    end
     newmt.__index = function(self, key)
         if key == "Position" then return spoofedPosition end
         if key == "Velocity" then return spoofedVelocity end
@@ -89,23 +140,23 @@ local function setupPositionSpoofing()
         return nil
     end
     pcall(setrawmetatable, hrp, newmt)
-    activeHooks.positionSpoof = true
+    activeHooks.antiTeleport = true
 end
 
-local function removePositionSpoofing()
-    if not activeHooks.positionSpoof then return end
+local function removeAntiTeleport()
+    if not activeHooks.antiTeleport then return end
     local hrp = game.Players.LocalPlayer.Character and game.Players.LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
     if hrp then
-        local success, mt = pcall(getrawmetatable, hrp)
-        if success and mt then
+        local mt = getrawmetatable(hrp)
+        if mt then
             local restored = {}
             for k, v in pairs(mt) do restored[k] = v end
-            if hrpIndexBackup then restored.__index = hrpIndexBackup end
+            restored.__index = hrpIndexBackup
+            restored.__newindex = hrpNewIndexBackup
             pcall(setrawmetatable, hrp, restored)
         end
     end
-    hrpIndexBackup = nil
-    activeHooks.positionSpoof = false
+    activeHooks.antiTeleport = false
     spoofedPosition = nil
     spoofedVelocity = nil
 end
@@ -206,13 +257,13 @@ local function setupCharacterHook()
     conn = plr.CharacterAdded:Connect(function(char)
         task.wait(0.2)
         if isBypassActive then
-            if activeHooks.flyBypass then
-                removeFlyBypass()
-                setupFlyBypass()
+            if activeHooks.flySpeedBypass then
+                removeFlySpeedBypass()
+                setupFlySpeedBypass()
             end
-            if activeHooks.positionSpoof then
-                removePositionSpoofing()
-                setupPositionSpoofing()
+            if activeHooks.antiTeleport then
+                removeAntiTeleport()
+                setupAntiTeleport()
             end
         end
     end)
@@ -229,9 +280,9 @@ end
 function BypassModule.enable()
     if isBypassActive then return true end
     if not canUseBypasses() then return false end
-    setupFlyBypass()
-    setupAntiKick()
-    setupPositionSpoofing()
+    setupFlySpeedBypass()
+    setupAntiKickTransfer()
+    setupAntiTeleport()
     setupHideGlobals()
     setupViolationBlock()
     setupCharacterHook()
@@ -241,9 +292,9 @@ end
 
 function BypassModule.disable()
     if not isBypassActive then return end
-    removeFlyBypass()
-    removeAntiKick()
-    removePositionSpoofing()
+    removeFlySpeedBypass()
+    removeAntiKickTransfer()
+    removeAntiTeleport()
     removeHideGlobals()
     removeViolationBlock()
     removeCharacterHook()
