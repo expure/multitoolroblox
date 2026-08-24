@@ -484,7 +484,7 @@ local function createKeyGUI()
         end
     end)
     
-    task.delay(5, function()
+    task.delay(10, function()
         skipBtn.Visible = true
         local fadeIn = TweenService:Create(skipBtn, TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
             BackgroundTransparency = 0.3
