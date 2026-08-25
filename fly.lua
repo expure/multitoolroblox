@@ -9,7 +9,7 @@ local hrp = character:WaitForChild("HumanoidRootPart")
 local Mouse = player:GetMouse()
 
 local flyEnabled = false
-local flySpeedMult = 1
+local flySpeedMult = 0.45
 local flyBodyGyro = nil
 local flyBodyVelocity = nil
 local flyControls = {f=0,b=0,l=0,r=0, up=0, down=0}
