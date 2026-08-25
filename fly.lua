@@ -12,7 +12,7 @@ local flyEnabled = false
 local flySpeedMult = 1
 local flyBodyGyro = nil
 local flyBodyVelocity = nil
-local flyControls = {f=0,b=0,l=0,r=0}
+local flyControls = {f=0,b=0,l=0,r=0, up=0, down=0}
 local lastFlyControls = {f=0,b=0,l=0,r=0}
 local currentFlySpeed = 0
 local baseFlySpeed = 50
@@ -120,50 +120,10 @@ local function setFlyEnabled(enabled)
         if flyBodyGyro then flyBodyGyro:Destroy() flyBodyGyro = nil end
         if flyBodyVelocity then flyBodyVelocity:Destroy() flyBodyVelocity = nil end
         humanoid.PlatformStand = false
-        flyControls = {f=0, b=0, l=0, r=0}
+        flyControls = {f=0, b=0, l=0, r=0, up=0, down=0}
         currentFlySpeed = 0
         Notify("Fly disabled", "Fly", 2)
     end
-end
-
-local function updateFlySpeed()
-    local currentFlySpeedValue = baseFlySpeed * flySpeedMult
-    if flyControls.l + flyControls.r ~= 0 or flyControls.f + flyControls.b ~= 0 then
-        currentFlySpeed = currentFlySpeed + 0.5 + (currentFlySpeed / currentFlySpeedValue)
-        if currentFlySpeed > currentFlySpeedValue then currentFlySpeed = currentFlySpeedValue end
-    elseif currentFlySpeed ~= 0 then
-        currentFlySpeed = currentFlySpeed - 1
-        if currentFlySpeed < 0 then currentFlySpeed = 0 end
-    end
-    if (flyControls.l + flyControls.r) ~= 0 or (flyControls.f + flyControls.b) ~= 0 then
-        local look = workspace.CurrentCamera.CFrame.LookVector
-        local side = (workspace.CurrentCamera.CFrame * CFrame.new(flyControls.l + flyControls.r, (flyControls.f + flyControls.b) * 0.2, 0).p) - workspace.CurrentCamera.CFrame.p
-        flyBodyVelocity.Velocity = (look * (flyControls.f + flyControls.b) + side) * currentFlySpeed
-        lastFlyControls = {f = flyControls.f, b = flyControls.b, l = flyControls.l, r = flyControls.r}
-    elseif currentFlySpeed ~= 0 then
-        local look = workspace.CurrentCamera.CFrame.LookVector
-        local side = (workspace.CurrentCamera.CFrame * CFrame.new(lastFlyControls.l + lastFlyControls.r, (lastFlyControls.f + lastFlyControls.b) * 0.2, 0).p) - workspace.CurrentCamera.CFrame.p
-        flyBodyVelocity.Velocity = (look * (lastFlyControls.f + lastFlyControls.b) + side) * currentFlySpeed
-    else
-        flyBodyVelocity.Velocity = Vector3.new(0, 0, 0)
-    end
-    flyBodyGyro.CFrame = workspace.CurrentCamera.CFrame
-end
-
-local function updateSliderUI(sliderData, value, minVal, maxVal)
-    value = tonumber(value) or 1
-    value = math.clamp(value, minVal, maxVal)
-    local logMin = math.log10(minVal)
-    local logMax = math.log10(maxVal)
-    local logValue = math.log10(value)
-    local ratio = (logValue - logMin) / (logMax - logMin)
-    ratio = math.clamp(ratio, 0, 1)
-    sliderData.fill.Size = UDim2.new(ratio, 0, 1, 0)
-    local btnPos = ratio * sliderData.slider.AbsoluteSize.X - 8
-    local relativePos = btnPos / sliderData.slider.AbsoluteSize.X
-    sliderData.button.Position = UDim2.new(relativePos, -8, -0.4, 0)
-    sliderData.box.Text = string.format("%.3f", value)
-    return value
 end
 
 local gui = Instance.new("ScreenGui")
@@ -325,6 +285,78 @@ local boxCorner = Instance.new("UICorner")
 boxCorner.CornerRadius = UDim.new(0.2, 0)
 boxCorner.Parent = speedBox
 
+-- Кнопки UP и DOWN для мобильных устройств
+local upBtn = Instance.new("TextButton")
+upBtn.Size = UDim2.new(0.4, -10, 0, 24)
+upBtn.Position = UDim2.new(0.05, 0, 0.8, 0)
+upBtn.Text = "UP"
+upBtn.Font = Enum.Font.GothamBold
+upBtn.TextSize = 12
+upBtn.BackgroundColor3 = Color3.fromRGB(80, 80, 90)
+upBtn.BackgroundTransparency = 0.2
+upBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+upBtn.BorderSizePixel = 0
+upBtn.Parent = frame
+local upCorner = Instance.new("UICorner")
+upCorner.CornerRadius = UDim.new(0.2, 0)
+upCorner.Parent = upBtn
+
+local downBtn = Instance.new("TextButton")
+downBtn.Size = UDim2.new(0.4, -10, 0, 24)
+downBtn.Position = UDim2.new(0.55, 0, 0.8, 0)
+downBtn.Text = "DOWN"
+downBtn.Font = Enum.Font.GothamBold
+downBtn.TextSize = 12
+downBtn.BackgroundColor3 = Color3.fromRGB(80, 80, 90)
+downBtn.BackgroundTransparency = 0.2
+downBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+downBtn.BorderSizePixel = 0
+downBtn.Parent = frame
+local downCorner = Instance.new("UICorner")
+downCorner.CornerRadius = UDim.new(0.2, 0)
+downCorner.Parent = downBtn
+
+local function bindHoldButton(btn, controlKey, val)
+    btn.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            flyControls[controlKey] = val
+        end
+    end)
+    btn.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            flyControls[controlKey] = 0
+        end
+    end)
+end
+
+bindHoldButton(upBtn, "up", 1)
+bindHoldButton(downBtn, "down", -1)
+
+-- Безопасное масштабирование UI для телефонов (без UIScale, чтобы слайдер не ломался)
+local function scaleGui(element, s)
+    if element:IsA("GuiObject") then
+        local newSize = UDim2.new(element.Size.X.Scale, element.Size.X.Offset * s, element.Size.Y.Scale, element.Size.Y.Offset * s)
+        local newPos = UDim2.new(element.Position.X.Scale, element.Position.X.Offset * s, element.Position.Y.Scale, element.Position.Y.Offset * s)
+        element.Size = newSize
+        element.Position = newPos
+        
+        if element:IsA("TextLabel") or element:IsA("TextButton") or element:IsA("TextBox") then
+            element.TextSize = element.TextSize * s
+        end
+    elseif element:IsA("UIStroke") then
+        element.Thickness = element.Thickness * s
+    elseif element:IsA("UICorner") then
+        local r = element.CornerRadius
+        element.CornerRadius = UDim.new(r.Scale, r.Offset * s)
+    end
+    
+    for _, child in pairs(element:GetChildren()) do
+        scaleGui(child, s)
+    end
+end
+
+scaleGui(gui, UIS.TouchEnabled and 0.75 or 1)
+
 local function updateFlyDisplay()
     toggleBtn.Text = flyEnabled and "FLY ON" or "FLY OFF"
     toggleBtn.BackgroundColor3 = flyEnabled and Color3.fromRGB(0, 200, 100) or Color3.fromRGB(0, 150, 200)
@@ -340,12 +372,14 @@ local function refreshSlider()
     speedBox.Text = string.format("%.3f", flySpeedMult)
 end
 
-sliderButton.MouseButton1Down:Connect(function()
-    sliderDragging = true
+sliderButton.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        sliderDragging = true
+    end
 end)
 
 UIS.InputChanged:Connect(function(input)
-    if input.UserInputType ~= Enum.UserInputType.MouseMovement then return end
+    if input.UserInputType ~= Enum.UserInputType.MouseMovement and input.UserInputType ~= Enum.UserInputType.Touch then return end
     if sliderDragging then
         local pos = input.Position.X - sliderFrame.AbsolutePosition.X
         local ratio = math.clamp(pos / sliderFrame.AbsoluteSize.X, 0, 1)
@@ -358,7 +392,7 @@ UIS.InputChanged:Connect(function(input)
 end)
 
 UIS.InputEnded:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
         sliderDragging = false
     end
 end)
@@ -458,24 +492,17 @@ UIS.InputBegan:Connect(function(input, processed)
     end
 end)
 
+-- Оставляем ручную обработку Space и LeftControl (для ПК)
 UIS.InputBegan:Connect(function(input, processed)
     if processed or not flyEnabled then return end
-    if input.KeyCode == Enum.KeyCode.W then flyControls.f = 1
-    elseif input.KeyCode == Enum.KeyCode.S then flyControls.b = -1
-    elseif input.KeyCode == Enum.KeyCode.A then flyControls.l = -1
-    elseif input.KeyCode == Enum.KeyCode.D then flyControls.r = 1
-    elseif input.KeyCode == Enum.KeyCode.Space then flyControls.up = 1
+    if input.KeyCode == Enum.KeyCode.Space then flyControls.up = 1
     elseif input.KeyCode == Enum.KeyCode.LeftControl then flyControls.down = -1
     end
 end)
 
 UIS.InputEnded:Connect(function(input)
     if not flyEnabled then return end
-    if input.KeyCode == Enum.KeyCode.W then flyControls.f = 0
-    elseif input.KeyCode == Enum.KeyCode.S then flyControls.b = 0
-    elseif input.KeyCode == Enum.KeyCode.A then flyControls.l = 0
-    elseif input.KeyCode == Enum.KeyCode.D then flyControls.r = 0
-    elseif input.KeyCode == Enum.KeyCode.Space then flyControls.up = 0
+    if input.KeyCode == Enum.KeyCode.Space then flyControls.up = 0
     elseif input.KeyCode == Enum.KeyCode.LeftControl then flyControls.down = 0
     end
 end)
@@ -484,7 +511,21 @@ local camera = workspace.CurrentCamera
 RunService.Heartbeat:Connect(function()
     if flyEnabled and flyBodyGyro and flyBodyVelocity then
         local currentFlySpeedValue = baseFlySpeed * flySpeedMult
+        
+        -- Чтение направления из Humanoid.MoveDirection (Автоматически работает для WASD, Геймпада и Телефонного джойстика)
+        local moveVec = humanoid.MoveDirection
+        local camCF = camera.CFrame
+        local forwardDot = camCF.LookVector:Dot(moveVec)
+        local rightDot = camCF.RightVector:Dot(moveVec)
+        
+        local threshold = 0.1
+        flyControls.f = forwardDot > threshold and math.clamp(forwardDot, 0, 1) or 0
+        flyControls.b = forwardDot < -threshold and math.clamp(forwardDot, -1, 0) or 0
+        flyControls.r = rightDot > threshold and math.clamp(rightDot, 0, 1) or 0
+        flyControls.l = rightDot < -threshold and math.clamp(rightDot, -1, 0) or 0
+        
         local upDown = (flyControls.up or 0) + (flyControls.down or 0)
+        
         if flyControls.l + flyControls.r ~= 0 or flyControls.f + flyControls.b ~= 0 or upDown ~= 0 then
             currentFlySpeed = currentFlySpeed + 0.5 + (currentFlySpeed / currentFlySpeedValue)
             if currentFlySpeed > currentFlySpeedValue then currentFlySpeed = currentFlySpeedValue end
@@ -492,12 +533,19 @@ RunService.Heartbeat:Connect(function()
             currentFlySpeed = currentFlySpeed - 1
             if currentFlySpeed < 0 then currentFlySpeed = 0 end
         end
+        
         local look = camera.CFrame.LookVector
         local right = camera.CFrame.RightVector
         local up = camera.CFrame.UpVector
         local moveDir = (look * (flyControls.f + flyControls.b) + right * (flyControls.l + flyControls.r) + up * upDown)
+        
+        -- Аналоговая скорость (зависит от того, насколько сильно отклонен джойстик)
+        local horizontalMag = math.clamp(Vector3.new(moveDir.X, 0, moveDir.Z).Magnitude, 0, 1)
+        local verticalMag = math.abs(moveDir.Y)
+        local stickMag = math.max(horizontalMag, verticalMag)
+        
         if moveDir.Magnitude > 0 then
-            flyBodyVelocity.Velocity = moveDir.Unit * currentFlySpeed
+            flyBodyVelocity.Velocity = moveDir.Unit * currentFlySpeed * stickMag
         else
             flyBodyVelocity.Velocity = Vector3.new(0, 0, 0)
         end
@@ -516,4 +564,4 @@ end)
 
 refreshSlider()
 updateFlyDisplay()
-Notify("Fly panel loaded! Click ? to bind a key", "Fly", 3)
+Notify("Fly panel loaded! Use WASD/Thumbstick", "Fly", 3)
