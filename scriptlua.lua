@@ -18,6 +18,10 @@ local supportedGames = {
         url = "https://raw.githubusercontent.com/expure/multitoolroblox/refs/heads/main/SSE2.lua",
         name = "Solar System Exploration 2"
     }
+    [78496323189083] = {
+        url = "https://raw.githubusercontent.com/expure/multitoolroblox/refs/heads/main/CI.lua",
+        name = "Cat Invasion"
+    }
 }
 
 local gui = nil
