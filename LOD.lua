@@ -10,7 +10,7 @@ local SCRIPT_URL="https://raw.githubusercontent.com/expure/multitoolroblox/refs/
 local CFG={
  SRC=SCRIPT_URL, PLANE="Plane", PASS="Passengers", FOOD="FoodCrate",
  A_TAKE="Take Food", A_FEED="Feed", A_TALK="Talk to Passenger", A_PICK="Pickup Delivery", A_ICE="Break Ice", A_SEAT="Seat",
- ICE_N=6, ICE_D=0.01, PASSOUT=10, ROLLMAX=30, FOODBUF=6,
+ ICE_N=6, ICE_D=0.01, PASSOUT=1, ROLLMAX=30, FOODBUF=6,
  AMT={"Plane","FoodCrate","FoodCrate","Part","SurfaceGui","Frame","Amount"},
  SCAN=0.08, WMIN=0, WMAX=200, WDEF=16, FLYM=10, FLYL=0.6, FLYB=2, FEEDCD=0.132,
  PURW=0.2, DELW=0.54, PICKW=0.066, TSD=0.017, TTIME=1.5,
