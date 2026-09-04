@@ -9,7 +9,7 @@ local SELF_FILE="AIPilotSelf.lua"
 local STATE_FILE="AIPilotFarmState.txt"
 
 local CFG={
- SRC="", PLANE="Plane", PASS="Passengers", FOOD="FoodCrate",
+ SRC="https://raw.githubusercontent.com/expure/multitoolroblox/refs/heads/main/LOD.lua", PLANE="Plane", PASS="Passengers", FOOD="FoodCrate",
  A_TAKE="Take Food", A_FEED="Feed", A_TALK="Talk to Passenger", A_PICK="Pickup Delivery", A_ICE="Break Ice", A_SEAT="Seat",
  ICE_N=6, ICE_D=0.01, PASSOUT=10, ROLLMAX=30, FOODBUF=6,
  AMT={"Plane","FoodCrate","FoodCrate","Part","SurfaceGui","Frame","Amount"},
