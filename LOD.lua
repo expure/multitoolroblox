@@ -4,12 +4,11 @@ local SG=game:GetService("StarterGui") local HS=game:GetService("HttpService")
 local player=Players.LocalPlayer
 local playerGui=player:WaitForChild("PlayerGui")
 
-local SELF_MARKER="AIPilotHub_SelfSave_v1"
-local SELF_FILE="AIPilotSelf.lua"
 local STATE_FILE="AIPilotFarmState.txt"
+local SCRIPT_URL="https://raw.githubusercontent.com/expure/multitoolroblox/refs/heads/main/LOD.lua"
 
 local CFG={
- SRC="https://raw.githubusercontent.com/expure/multitoolroblox/refs/heads/main/LOD.lua", PLANE="Plane", PASS="Passengers", FOOD="FoodCrate",
+ SRC=SCRIPT_URL, PLANE="Plane", PASS="Passengers", FOOD="FoodCrate",
  A_TAKE="Take Food", A_FEED="Feed", A_TALK="Talk to Passenger", A_PICK="Pickup Delivery", A_ICE="Break Ice", A_SEAT="Seat",
  ICE_N=6, ICE_D=0.01, PASSOUT=10, ROLLMAX=30, FOODBUF=6,
  AMT={"Plane","FoodCrate","FoodCrate","Part","SurfaceGui","Frame","Amount"},
@@ -44,42 +43,6 @@ local function loadFarm()
 	end)
 	return on
 end
-
-local function findOwnSource()
-	local out=nil
-	if CFG.SRC and CFG.SRC~="" then
-		pcall(function() local r=game:HttpGet(CFG.SRC); if type(r)=="string" and r~="" then out=r end end)
-	end
-	if not out and type(readfile)=="function" and type(isfile)=="function" and isfile(SELF_FILE) then
-		pcall(function() local s=readfile(SELF_FILE); if type(s)=="string" and s:find(SELF_MARKER,1,true) then out=s end end)
-	end
-	if not out and type(listfiles)=="function" and type(readfile)=="function" then
-		pcall(function()
-			local dirs={"tabs",""}
-			for _,d in ipairs(dirs) do
-				local ok,files=pcall(function() return listfiles(d) end)
-				if ok and type(files)=="table" then
-					for _,f in ipairs(files) do
-						if not out and type(f)=="string" and (f:find(".luau",1,true) or f:find(".lua",1,true) or f:find(".txt",1,true)) then
-							local ok2,s=pcall(function() return readfile(f) end)
-							if ok2 and type(s)=="string" and #s<500000 and s:find(SELF_MARKER,1,true) then out=s end
-						end
-					end
-				end
-				if out then break end
-			end
-		end)
-	end
-	return out
-end
-
-task.spawn(function()
-	local src=findOwnSource()
-	if src and type(writefile)=="function" then
-		pcall(function() writefile(SELF_FILE, src) end)
-		print("[Hub] code saved to "..SELF_FILE)
-	end
-end)
 
 local U={}
 local VIM=nil; pcall(function() VIM=game:GetService("VirtualInputManager") end)
@@ -760,18 +723,12 @@ do
 			'while not Players.LocalPlayer do task.wait(0.1) end\n' ..
 			'local player = Players.LocalPlayer\n' ..
 			'while not player:FindFirstChild("PlayerGui") or not player.Character do task.wait(0.1) end\n' ..
-			'print("AI Pilot: restarting on new server (local buffer)")\n' ..
-			'local src = nil\n' ..
-			'pcall(function()\n' ..
-			'    if type(isfile) == "function" and type(readfile) == "function" then\n' ..
-			'        if isfile("' .. SELF_FILE .. '") then src = readfile("' .. SELF_FILE .. '") end\n' ..
-			'    end\n' ..
+			'print("AI Pilot: restarting on new server (network load)")\n' ..
+			'local success, err = pcall(function()\n' ..
+			'    loadstring(game:HttpGet("' .. SCRIPT_URL .. '"))()\n' ..
 			'end)\n' ..
-			'if src then\n' ..
-			'    local fn, err = loadstring(src)\n' ..
-			'    if fn then pcall(fn) else warn("AI Pilot loadstring error: " .. tostring(err)) end\n' ..
-			'else\n' ..
-			'    warn("AI Pilot: file ' .. SELF_FILE .. ' not found")\n' ..
+			'if not success then\n' ..
+			'    warn("AI Pilot Error: " .. tostring(err))\n' ..
 			'end\n'
 		pcall(queueFunc, payload)
 	else
