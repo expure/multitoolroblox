@@ -2,7 +2,6 @@ local Players=game:GetService("Players"); local RunService=game:GetService("RunS
 local UIS=game:GetService("UserInputService"); local RS=game:GetService("ReplicatedStorage");
 local SG=game:GetService("StarterGui"); local HS=game:GetService("HttpService");
 local GuiService=game:GetService("GuiService"); local TS=game:GetService("TeleportService");
-local TweenService=game:GetService("TweenService");
 local player=Players.LocalPlayer
 local playerGui=player:WaitForChild("PlayerGui")
 
@@ -15,7 +14,7 @@ local FARM_MODES={ fc="Feed&Control", af="Always Feed", pc="Prioritise Control" 
 local CFG={
  SRC=SCRIPT_URL, PLANE="Plane", PASS="Passengers", FOOD="FoodCrate",
  A_TAKE="Take Food", A_FEED="Feed", A_TALK="Talk to Passenger", A_PICK="Pickup Delivery", A_ICE="Break Ice", A_SEAT="Seat",
- ICE_N=6, ICE_D=0.01, PASSOUT=10, ROLLMAX=30, FOODBUF=6, LOBBY_INT=7, GROUND=108, TOUCH=5, FEED_TWEEN=0.2,
+ ICE_N=6, ICE_D=0.01, PASSOUT=10, ROLLMAX=30, FOODBUF=6, LOBBY_INT=7, GROUND=108, TOUCH=5,
  AMT={"Plane","FoodCrate","FoodCrate","Part","SurfaceGui","Frame","Amount"},
  SCAN=0.08, WMIN=0, WMAX=200, WDEF=16, FLYM=10, FLYL=0.6, FLYB=2,
  PURW=0.2, DELW=0.54, PICKW=0.066, TSD=0.017, TTIME=1.5,
@@ -111,17 +110,6 @@ local function fastTeleport(part,off)
 		task.wait()
 	end
 	root.CFrame=goal; task.wait(0.03); return true
-end
-local function tweenTo(part,off,duration)
-	local root=getRoot(player.Character); local p=getPos(part)
-	if not root or not p then return false end
-	off=off or Vector3.new(0,3,0)
-	local goal=CFrame.new(p+off)
-	local ti=TweenInfo.new(duration or CFG.FEED_TWEEN, Enum.EasingStyle.Linear)
-	local tw=TweenService:Create(root, ti, {CFrame=goal})
-	tw:Play()
-	tw.Completed:Wait()
-	return true
 end
 local function teleportToTablet()
 	local tab=playerGui:FindFirstChild("Tablet")
@@ -609,11 +597,11 @@ local function ensureFood(tok)
 	return equipSandwich()
 end
 
--- подлёт 0.2 сек, БЕЗ кулдауна после
+-- обычная телепортация к пассажиру (без Tween)
 local function feedOne(pm,tok)
 	if not equipSandwich() then return false end
 	local pr=pm:FindFirstChild("HumanoidRootPart") or getRootPart(pm); if not pr then return false end
-	tweenTo(pr, Vector3.new(0,0.5,1), CFG.FEED_TWEEN)
+	teleport(pr,Vector3.new(0,0.5,1))
 	for _=1,CFG.ICE_N do fireTT(CFG.A_ICE,pm); task.wait(CFG.ICE_D) end
 	local un=camLock(pr)
 	fireTT(CFG.A_FEED,pm); fireTT(CFG.A_FEED,pr)
