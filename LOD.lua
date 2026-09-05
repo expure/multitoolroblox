@@ -1,16 +1,24 @@
-local Players=game:GetService("Players") local RunService=game:GetService("RunService")
-local UIS=game:GetService("UserInputService") local RS=game:GetService("ReplicatedStorage")
-local SG=game:GetService("StarterGui") local HS=game:GetService("HttpService")
+local Players=game:GetService("Players"); local RunService=game:GetService("RunService");
+local UIS=game:GetService("UserInputService"); local RS=game:GetService("ReplicatedStorage");
+local SG=game:GetService("StarterGui"); local HS=game:GetService("HttpService");
+local GuiService=game:GetService("GuiService"); local TS=game:GetService("TeleportService");
 local player=Players.LocalPlayer
 local playerGui=player:WaitForChild("PlayerGui")
 
 local STATE_FILE="AIPilotFarmState.txt"
+local MODE_FILE="AIPilotFarmMode.txt"
 local SCRIPT_URL="https://raw.githubusercontent.com/expure/multitoolroblox/refs/heads/main/LOD.lua"
+
+local FARM_MODES={
+ fc="Feed&Control",
+ af="Always Feed",
+ pc="Prioritise Control",
+}
 
 local CFG={
  SRC=SCRIPT_URL, PLANE="Plane", PASS="Passengers", FOOD="FoodCrate",
  A_TAKE="Take Food", A_FEED="Feed", A_TALK="Talk to Passenger", A_PICK="Pickup Delivery", A_ICE="Break Ice", A_SEAT="Seat",
- ICE_N=6, ICE_D=0.01, PASSOUT=1, ROLLMAX=30, FOODBUF=6,
+ ICE_N=6, ICE_D=0.01, PASSOUT=10, ROLLMAX=30, FOODBUF=6, LOBBY_INT=7,
  AMT={"Plane","FoodCrate","FoodCrate","Part","SurfaceGui","Frame","Amount"},
  SCAN=0.08, WMIN=0, WMAX=200, WDEF=16, FLYM=10, FLYL=0.6, FLYB=2, FEEDCD=0.132,
  PURW=0.2, DELW=0.54, PICKW=0.066, TSD=0.017, TTIME=1.5,
@@ -27,11 +35,12 @@ local CFG={
 
 local S={
  esp=false, fly=false, feed=false, feedTok=0,
- walk=16, restart=false, farm=false,
+ walk=16, restart=false, farm=false, farmMode="fc",
  ai=false, model=nil, curModel=1, landing=false, distT=0, yaw=nil,
  aip={W=false,A=false,S=false,D=false}, aih={W=0,A=0,S=0,D=0},
  aAlt=nil, aAltT=0, aVS=0, aLandT=0, sAGL=1, sI=1, aM=nil, aMT=0, aMPS=0.3,
  atc=false, atcTok=0,
+ lobbyMode=false, lobbyInterrupt=false, lobbySeq=false,
  active={}, tAtt=nil, tCur=nil, flyConn=nil,
 }
 
@@ -42,6 +51,17 @@ local function loadFarm()
 		if type(readfile)=="function" and type(isfile)=="function" and isfile(STATE_FILE) then on = readfile(STATE_FILE)=="1" end
 	end)
 	return on
+end
+local function saveFarmMode(m) pcall(function() if type(writefile)=="function" then writefile(MODE_FILE, m) end end) end
+local function loadFarmMode()
+	local m="fc"
+	pcall(function()
+		if type(readfile)=="function" and type(isfile)=="function" and isfile(MODE_FILE) then
+			local s=readfile(MODE_FILE)
+			if s and FARM_MODES[s] then m=s end
+		end
+	end)
+	return m
 end
 
 local U={}
@@ -82,6 +102,19 @@ local function teleport(part,off)
 	end
 	root.CFrame=goal; task.wait(0.03); return true
 end
+local function fastTeleport(part,off)
+	local root=getRoot(player.Character); local p=getPos(part)
+	if not root or not p then return false end
+	off=off or Vector3.new(0,3,0); local t=p+off
+	local start=root.CFrame; local goal=CFrame.new(t)
+	local dur=0.08; local st=tick()
+	while tick()-st<dur do
+		local a=(tick()-st)/dur
+		root.CFrame=start:Lerp(goal,a)
+		task.wait()
+	end
+	root.CFrame=goal; task.wait(0.03); return true
+end
 
 do
 	local o=playerGui:FindFirstChild("PassengerESPGui"); if o then o:Destroy() end
@@ -109,21 +142,22 @@ do
 	U.feed=mk(5,"Auto Passenger Feed: START",Color3.fromRGB(45,80,160))
 	U.ai=mk(6,"AI PILOT: OFF",Color3.fromRGB(60,120,80))
 	U.model=mk(7,"Model: "..CFG.MODELS[S.curModel].name,Color3.fromRGB(80,80,160))
-	U.farm=mk(8,"AUTO FARM: OFF",Color3.fromRGB(160,120,40))
-	U.atc=mk(9,"AUTO ATC: OFF",Color3.fromRGB(110,80,140))
-	U.restart=mk(10,"RESTART AFTER LAND: OFF",Color3.fromRGB(110,80,140))
-	U.status=Instance.new("TextLabel"); U.status.LayoutOrder=11; U.status.Size=UDim2.new(1,0,0,0); U.status.AutomaticSize=Enum.AutomaticSize.Y; U.status.BackgroundTransparency=1; U.status.Text="Status: Idle"; U.status.TextColor3=Color3.fromRGB(200,200,210); U.status.TextSize=12; U.status.Font=Enum.Font.Gotham; U.status.TextWrapped=true; U.status.TextXAlignment=Enum.TextXAlignment.Left; U.status.TextYAlignment=Enum.TextYAlignment.Top; U.status.Parent=U.main
+	U.farmMode=mk(8,"Farm Mode: "..FARM_MODES[S.farmMode],Color3.fromRGB(100,100,140))
+	U.farm=mk(9,"AUTO FARM: OFF",Color3.fromRGB(160,120,40))
+	U.atc=mk(10,"AUTO ATC: OFF",Color3.fromRGB(110,80,140))
+	U.restart=mk(11,"RESTART AFTER LAND: OFF",Color3.fromRGB(110,80,140))
+	U.status=Instance.new("TextLabel"); U.status.LayoutOrder=12; U.status.Size=UDim2.new(1,0,0,0); U.status.AutomaticSize=Enum.AutomaticSize.Y; U.status.BackgroundTransparency=1; U.status.Text="Status: Idle"; U.status.TextColor3=Color3.fromRGB(200,200,210); U.status.TextSize=12; U.status.Font=Enum.Font.Gotham; U.status.TextWrapped=true; U.status.TextXAlignment=Enum.TextXAlignment.Left; U.status.TextYAlignment=Enum.TextYAlignment.Top; U.status.Parent=U.main
 
 	U.farmGui=Instance.new("ScreenGui"); U.farmGui.Name="FarmOverlay"; U.farmGui.ResetOnSpawn=false; U.farmGui.DisplayOrder=20; U.farmGui.Enabled=false; U.farmGui.Parent=playerGui
 	U.farmBox=Instance.new("TextButton"); U.farmBox.AnchorPoint=Vector2.new(0.5,0.5); U.farmBox.Position=UDim2.new(0.5,0,0.5,0)
 	U.farmBox.Size=UDim2.new(0.1,0,0.1,0); U.farmBox.BackgroundColor3=Color3.fromRGB(15,35,20); U.farmBox.AutoButtonColor=false; U.farmBox.Text=""; U.farmBox.Parent=U.farmGui; rnd(U.farmBox,10)
-	local fl=Instance.new("TextLabel"); fl.Size=UDim2.new(1,0,0.45,0); fl.Position=UDim2.new(0,0,0.08,0); fl.BackgroundTransparency=1
-	fl.Text="Auto Farm Active!"; fl.TextColor3=Color3.fromRGB(140,255,170); fl.TextScaled=true; fl.Font=Enum.Font.GothamBold; fl.Parent=U.farmBox
-	local bl=Instance.new("TextLabel"); bl.Size=UDim2.new(1,0,0.5,0); bl.Position=UDim2.new(0,0,0.5,0); bl.BackgroundTransparency=1
-	bl.Text="By EXVS"; bl.TextColor3=Color3.fromRGB(255,255,255); bl.TextScaled=true; bl.Font=Enum.Font.GothamBlack; bl.Parent=U.farmBox
+	U.farmTitle=Instance.new("TextLabel"); U.farmTitle.Size=UDim2.new(1,0,0.45,0); U.farmTitle.Position=UDim2.new(0,0,0.08,0); U.farmTitle.BackgroundTransparency=1
+	U.farmTitle.Text="Auto Farm Active!"; U.farmTitle.TextColor3=Color3.fromRGB(140,255,170); U.farmTitle.TextScaled=true; U.farmTitle.Font=Enum.Font.GothamBold; U.farmTitle.Parent=U.farmBox
+	U.farmSubtitle=Instance.new("TextLabel"); U.farmSubtitle.Size=UDim2.new(1,0,0.5,0); U.farmSubtitle.Position=UDim2.new(0,0,0.5,0); U.farmSubtitle.BackgroundTransparency=1
+	U.farmSubtitle.Text="By EXVS"; U.farmSubtitle.TextColor3=Color3.fromRGB(255,255,255); U.farmSubtitle.TextScaled=true; U.farmSubtitle.Font=Enum.Font.GothamBlack; U.farmSubtitle.Parent=U.farmBox
 end
 
-local function setStatus(t) U.status.Text="Status: "..tostring(t) print("[Hub]",t) end
+local function setStatus(t) U.status.Text="Status: "..tostring(t); print("[Hub]",t) end
 local function updWalk() local r=(S.walk-CFG.WMIN)/(CFG.WMAX-CFG.WMIN); U.sliderFill.Size=UDim2.fromScale(r,1); U.sliderKnob.Position=UDim2.fromScale(r,0.5); U.walkLabel.Text="WalkSpeed: "..S.walk end
 local function applyWalk() local c=player.Character; local h=c and c:FindFirstChildOfClass("Humanoid"); if h then h.WalkSpeed=S.walk end end
 local function setWalk(v) S.walk=math.clamp(math.floor(v+0.5),CFG.WMIN,CFG.WMAX); updWalk(); applyWalk() end
@@ -132,9 +166,54 @@ local function updESP() U.esp.Text=S.esp and "Passenger ESP: ON" or "Passenger E
 local function updFeed() U.feed.Text=S.feed and "Auto Passenger Feed: STOP" or "Auto Passenger Feed: START"; U.feed.BackgroundColor3=S.feed and Color3.fromRGB(170,110,30) or Color3.fromRGB(45,80,160) end
 local function updAI() U.ai.Text=S.ai and "AI PILOT: ON" or "AI PILOT: OFF"; U.ai.BackgroundColor3=S.ai and Color3.fromRGB(40,160,90) or Color3.fromRGB(60,120,80) end
 local function updModel() U.model.Text="Model: "..CFG.MODELS[S.curModel].name end
+local function updFarmMode() U.farmMode.Text="Farm Mode: "..(FARM_MODES[S.farmMode] or "?") end
 local function updFarm() U.farm.Text=S.farm and "AUTO FARM: ON" or "AUTO FARM: OFF"; U.farm.BackgroundColor3=S.farm and Color3.fromRGB(60,180,120) or Color3.fromRGB(160,120,40) end
 local function updATC() U.atc.Text=S.atc and "AUTO ATC: ON" or "AUTO ATC: OFF"; U.atc.BackgroundColor3=S.atc and Color3.fromRGB(60,180,120) or Color3.fromRGB(110,80,140) end
 local function updRestart() U.restart.Text=S.restart and "RESTART AFTER LAND: ON" or "RESTART AFTER LAND: OFF"; U.restart.BackgroundColor3=S.restart and Color3.fromRGB(60,180,120) or Color3.fromRGB(110,80,140) end
+
+local function isLobby()
+	return workspace:FindFirstChild("Lobby") ~= nil
+end
+local function getLobbyMatchmaking()
+	local lobby=workspace:FindFirstChild("Lobby")
+	if not lobby then return nil end
+	return lobby:FindFirstChild("Matchmaking")
+end
+local function getLobbyEntryPoint()
+	local mm=getLobbyMatchmaking()
+	if not mm then return nil end
+	local ch=mm:GetChildren()
+	if #ch<4 then return nil end
+	return ch[4]:FindFirstChild("EntryPoint")
+end
+local function getHostVisible()
+	local ep=getLobbyEntryPoint()
+	if not ep then return false end
+	local lb=ep:FindFirstChild("UI")
+	if not lb then return false end
+	local f=lb:FindFirstChild("LobbyBillboard")
+	if not f then return false end
+	local fr=f:FindFirstChild("Frame")
+	if not fr then return false end
+	local h=fr:FindFirstChild("Host")
+	if not h then return false end
+	return h.Visible == true
+end
+
+local function setFarmBoxNormal()
+	U.farmBox.BackgroundColor3=Color3.fromRGB(15,35,20)
+	U.farmTitle.Text="Auto Farm Active!"
+	U.farmTitle.TextColor3=Color3.fromRGB(140,255,170)
+	U.farmSubtitle.Text="By EXVS"
+	U.farmSubtitle.TextColor3=Color3.fromRGB(255,255,255)
+end
+local function setFarmBoxInterrupt(remaining)
+	U.farmBox.BackgroundColor3=Color3.fromRGB(180,40,40)
+	U.farmTitle.Text="PRESS NOW FOR INTERRUPT"
+	U.farmTitle.TextColor3=Color3.fromRGB(255,255,255)
+	U.farmSubtitle.Text=string.format("%.1fs", remaining)
+	U.farmSubtitle.TextColor3=Color3.fromRGB(255,220,220)
+end
 
 local function setFarm(st)
 	if st==S.farm then return end
@@ -144,8 +223,97 @@ local function setFarm(st)
 	if st then S.atc=true; updATC() end
 	U.gui.Enabled = not st
 	U.farmGui.Enabled = st
-	setStatus(st and "Auto Farm: ON (+ATC)" or "Auto Farm: OFF")
+	if not st then
+		S.lobbyMode=false
+		S.lobbyInterrupt=true
+		setFarmBoxNormal()
+		setStatus("Auto Farm: OFF")
+	else
+		setStatus("Auto Farm: ON (+ATC) ["..(FARM_MODES[S.farmMode] or "?").."]")
+	end
 end
+
+local function runLobbySeq()
+	if S.lobbySeq then return end
+	S.lobbySeq=true
+	S.lobbyMode=true
+	S.lobbyInterrupt=false
+	setFarmBoxInterrupt(CFG.LOBBY_INT)
+	setStatus("Lobby: interrupt window open")
+
+	local start=tick()
+	while S.farm and S.lobbyMode and (tick()-start)<CFG.LOBBY_INT do
+		local rem=CFG.LOBBY_INT-(tick()-start)
+		if rem<=0 then break end
+		setFarmBoxInterrupt(rem)
+		task.wait(0.05)
+	end
+
+	if not S.farm or S.lobbyInterrupt then
+		S.lobbyMode=false
+		S.lobbySeq=false
+		setFarmBoxNormal()
+		if not S.farm then U.farmGui.Enabled=false; U.gui.Enabled=true end
+		setStatus("Lobby: interrupted")
+		return
+	end
+
+	setFarmBoxNormal()
+	setStatus("Lobby: waiting for Host.Visible=false")
+
+	local guard=0
+	while S.farm and guard<600 do
+		guard+=1
+		if not getHostVisible() then break end
+		task.wait(0.2)
+	end
+
+	if not S.farm then S.lobbySeq=false; S.lobbyMode=false; return end
+
+	local ep=getLobbyEntryPoint()
+	if ep then
+		setStatus("Lobby: teleporting to EntryPoint")
+		fastTeleport(ep, Vector3.new(0,3,0))
+	end
+
+	task.wait(0.5)
+
+	local mm=getLobbyMatchmaking()
+	if mm then
+		local ch=mm:GetChildren()
+		local target=(#ch>=4) and ch[4] or mm
+		setStatus("Lobby: firing Matchmaking remote")
+		pcall(function()
+			RS:WaitForChild("Matchmaking"):FireServer(
+				"start",
+				target,
+				{
+					difficulty = "Extreme",
+					player_cap = 1,
+					gamemode = "Classic",
+					friends_only = true
+				}
+			)
+		end)
+		setStatus("Lobby: matchmaking requested, waiting for teleport")
+	end
+
+	S.lobbyMode=false
+end
+
+task.spawn(function()
+	while true do
+		if not isLobby() then
+			if S.lobbySeq then S.lobbySeq=false end
+			if S.lobbyMode then S.lobbyMode=false end
+		else
+			if S.farm and not S.lobbySeq then
+				runLobbySeq()
+			end
+		end
+		task.wait(0.5)
+	end
+end)
 
 RunService.RenderStepped:Connect(function()
 	if S.walk~=CFG.WDEF then
@@ -189,7 +357,7 @@ local function setFly(st)
 			if not S.fly then return end
 			if UIS:GetFocusedTextBox() then return end
 			local root=getRoot(player.Character)
-			if not root or not root.Parent then S.fly=false; if S.flyConn then S.flyConn:Disconnect() S.flyConn=nil end; updFly(); return end
+			if not root or not root.Parent then S.fly=false; if S.flyConn then S.flyConn:Disconnect(); S.flyConn=nil end; updFly(); return end
 			if S.feed then return end
 			local cam=workspace.CurrentCamera
 			local f=cam.CFrame.LookVector; local r=cam.CFrame.RightVector; local up=Vector3.new(0,1,0)
@@ -339,26 +507,40 @@ local function worstPriority()
 	end
 	return bp,bm
 end
-local function invSet()
-	local s={}
-	local bp=player:FindFirstChildOfClass("Backpack") or player:FindFirstChild("Backpack")
-	if bp then for _,c in ipairs(bp:GetChildren()) do if c:IsA("Tool") then s[c]=true end end end
-	local ch=player.Character
-	if ch then for _,c in ipairs(ch:GetChildren()) do if c:IsA("Tool") then s[c]=true end end end
-	return s
+local function allPassengers()
+	local p=workspace:FindFirstChild(CFG.PLANE); local ps=p and p:FindFirstChild(CFG.PASS); if not ps then return {} end
+	local list={}; collectModels(ps,list)
+	return list
 end
-local function newTool(old)
-	local bp=player:FindFirstChildOfClass("Backpack") or player:FindFirstChild("Backpack")
-	if bp then for _,c in ipairs(bp:GetChildren()) do if c:IsA("Tool") and not old[c] then return c end end end
+
+-- еда: Sandwich
+local function countSandwiches()
+	local n=0
+	local bp=player:FindFirstChild("Backpack")
+	if bp then for _,c in ipairs(bp:GetChildren()) do if c.Name=="Sandwich" then n+=1 end end end
 	local ch=player.Character
-	if ch then for _,c in ipairs(ch:GetChildren()) do if c:IsA("Tool") and not old[c] then return c end end end
+	if ch then for _,c in ipairs(ch:GetChildren()) do if c.Name=="Sandwich" then n+=1 end end end
+	return n
+end
+local function equippedSandwich()
+	local ch=player.Character
+	if ch then return ch:FindFirstChild("Sandwich") end
 	return nil
 end
-local function hasTool()
-	local ch=player.Character; if not ch then return false end
-	for _,c in ipairs(ch:GetChildren()) do if c:IsA("Tool") then return true end end
+local function equipSandwich()
+	if equippedSandwich() then return true end
+	local ch=player.Character
+	local bp=player:FindFirstChild("Backpack")
+	if bp then
+		local s=bp:FindFirstChild("Sandwich")
+		if s then
+			local h=ch and ch:FindFirstChildOfClass("Humanoid")
+			if h then pcall(function() h:EquipTool(s) end) return true end
+		end
+	end
 	return false
 end
+local function hasTool() return countSandwiches()>0 end
 
 local function restock(tok)
 	local before=foodAmt() or 0
@@ -383,44 +565,47 @@ local function restock(tok)
 	end
 	return false
 end
+
+-- ИСПРАВЛЕНО: before считаем ДО отправки, ОДИН запрос Take Food = 1 еда
 local function takeFood(tok)
 	local t=foodTargets(); if #t==0 then return false end
 	local target=t[math.random(1,#t)]; local tp=partOf(target); if not tp then return false end
 	teleport(tp,Vector3.new(0,3,0)); task.wait(0.034)
-	local un=camLock(tp); local old=invSet()
+	local un=camLock(tp)
+	local before=countSandwiches()
 	fireTT(CFG.A_TAKE,target); un()
-	local nt=nil
-	for _=1,25 do
-		if not S.feed or S.feedTok~=tok then return false end
-		nt=newTool(old); if nt then break end
-		task.wait(0.02)
+	local st=tick()
+	while tick()-st<2 do
+		if countSandwiches()>before then return true end
+		task.wait(0.05)
 	end
-	if nt then
-		local h=player.Character and player.Character:FindFirstChildOfClass("Humanoid")
-		if h then pcall(function() h:EquipTool(nt) end) end
-		task.wait(0.02); return true
-	end
-	return false
+	return countSandwiches()>before
 end
+
+-- ИСПРАВЛЕНО: берём еду ТОЛЬКО если 0, и ровно ОДИН запрос Take Food
 local function ensureFood(tok)
-	local fa=foodAmt()
-	local low=(fa==nil) or (fa<=CFG.FOODBUF)
-	if low then
-		if not collectCrates(tok) then
+	if countSandwiches()>0 then return equipSandwich() end
+	if #foodTargets()>0 then
+		takeFood(tok)
+	else
+		collectCrates(tok)
+		if #foodTargets()>0 then
+			takeFood(tok)
+		else
 			restock(tok)
+			takeFood(tok)
 		end
 	end
-	if hasTool() then return true end
-	return takeFood(tok)
+	return equipSandwich()
 end
+
 local function feedOne(pm,tok)
+	if not equipSandwich() then return false end
 	local pr=pm:FindFirstChild("HumanoidRootPart") or getRootPart(pm); if not pr then return false end
 	teleport(pr,Vector3.new(0,1,2)); task.wait(0.034)
 	for _=1,CFG.ICE_N do fireTT(CFG.A_ICE,pm); task.wait(CFG.ICE_D) end
 	local un=camLock(pr)
-	for _=1,3 do
-		fireTT(CFG.A_FEED,pm); fireTT(CFG.A_FEED,pr); task.wait(0.05)
-	end
+	fireTT(CFG.A_FEED,pm); fireTT(CFG.A_FEED,pr)
 	fireTT(CFG.A_TALK,pm); fireTT(CFG.A_TALK,pr)
 	un()
 	task.wait(CFG.FEEDCD)
@@ -432,12 +617,7 @@ local function feedLoop(tok)
 		if not getRoot(player.Character) then task.wait(0.066) continue end
 		local _,pm=worstPriority()
 		if not pm then task.wait(0.334) continue end
-		if not hasTool() then
-			local fa=foodAmt()
-			if fa~=nil and fa<=0 then if not restock(tok) then continue end end
-			if not takeFood(tok) then if fa==nil then if restock(tok) then takeFood(tok) end end end
-			if not hasTool() then task.wait(0.066) continue end
-		end
+		if not ensureFood(tok) then task.wait(0.066) continue end
 		feedOne(pm,tok)
 	end
 	updFeed()
@@ -593,7 +773,7 @@ task.spawn(function()
 	if not ok then setStatus(n) return end
 	setStatus("Model: "..CFG.MODELS[S.curModel].name.." ("..n..")")
 	while U.gui and U.gui.Parent do
-		if S.ai then
+		if S.ai and not S.lobbyMode then
 			if not sitting() then setStatus("left the seat"); setAI(false)
 			else
 				local t=planeTorso(); local alt=getAlt(); local now=tick()
@@ -631,12 +811,10 @@ task.spawn(function()
 	end
 end)
 
-local function farmFeedAll(onlyOne)
+local function farmFeedFC(onlyOne)
 	local h=player.Character and player.Character:FindFirstChildOfClass("Humanoid")
 	if h then pcall(function() h.Sit=false end) end
 	local tok=S.feedTok+1; S.feedTok=tok; S.feed=true
-
-	collectCrates(tok)
 
 	if onlyOne then
 		local pr,pm=worstPriority()
@@ -659,29 +837,76 @@ local function farmFeedAll(onlyOne)
 	sitInSeat(getPilotSeat())
 end
 
+local function farmFeedPC()
+	local h=player.Character and player.Character:FindFirstChildOfClass("Humanoid")
+	if h then pcall(function() h.Sit=false end) end
+	local tok=S.feedTok+1; S.feedTok=tok; S.feed=true
+
+	local pr,pm=worstPriority()
+	if pm and pr>=4 then
+		ensureFood(tok)
+		feedOne(pm,tok)
+	end
+
+	S.feed=false; updFeed()
+	sitInSeat(getPilotSeat())
+end
+
+local function farmFeedAF()
+	local h=player.Character and player.Character:FindFirstChildOfClass("Humanoid")
+	if h then pcall(function() h.Sit=false end) end
+	local tok=S.feedTok+1; S.feedTok=tok; S.feed=true
+
+	local passengers=allPassengers()
+	for _,pm in ipairs(passengers) do
+		if not S.farm then break end
+		if not ensureFood(tok) then break end
+		if not feedOne(pm,tok) then continue end
+	end
+
+	S.feed=false; updFeed()
+end
+
 task.spawn(function()
 	while true do
-		if S.farm then
-			if S.model and not S.ai then setAI(true) end
-			local miles=getMiles()
-			local pr,_=worstPriority()
-			local t=planeTorso()
-			local roll=t and t.Orientation.Z or 0
-			local tooRoll=math.abs(roll)>CFG.ROLLMAX
+		if S.farm and not S.lobbyMode and not S.lobbySeq then
+			local mode=S.farmMode
 
-			local doFeed=false
-			if pr>=4 then
-				doFeed = (miles~=nil and miles>5)
-			elseif pr>=3 then
-				doFeed = (not S.landing) and (not tooRoll) and (miles~=nil and miles>15)
-			end
+			if mode=="af" then
+				setStatus("Always Feed: feeding all passengers")
+				farmFeedAF()
+				task.wait(1)
+			elseif mode=="pc" then
+				if S.model and not S.ai then setAI(true) end
+				local pr,_=worstPriority()
+				if pr>=4 then
+					setStatus("Prioritise Control: feeding stressed")
+					setAI(false)
+					farmFeedPC()
+					if S.farm then setAI(true) end
+				end
+			else
+				if S.model and not S.ai then setAI(true) end
+				local miles=getMiles()
+				local pr,_=worstPriority()
+				local t=planeTorso()
+				local roll=t and t.Orientation.Z or 0
+				local tooRoll=math.abs(roll)>CFG.ROLLMAX
 
-			if doFeed then
-				local onlyOne = S.landing or tooRoll
-				setStatus(string.format("Farm: getting up to feed (prio %d, mi %s, roll %.0f)%s", pr, miles and string.format("%.1f",miles) or "?", roll, onlyOne and " [stressed only]" or ""))
-				setAI(false)
-				farmFeedAll(onlyOne)
-				if S.farm then setAI(true) end
+				local doFeed=false
+				if pr>=4 then
+					doFeed = (miles~=nil and miles>5)
+				elseif pr>=3 then
+					doFeed = (not S.landing) and (not tooRoll) and (miles~=nil and miles>15)
+				end
+
+				if doFeed then
+					local onlyOne = S.landing or tooRoll
+					setStatus(string.format("Feed&Control: getting up to feed (prio %d, mi %s, roll %.0f)%s", pr, miles and string.format("%.1f",miles) or "?", roll, onlyOne and " [stressed only]" or ""))
+					setAI(false)
+					farmFeedFC(onlyOne)
+					if S.farm then setAI(true) end
+				end
 			end
 		end
 		task.wait(0.5)
@@ -709,12 +934,41 @@ task.spawn(function()
 	end
 end)
 
+task.spawn(function()
+	local TeleportService = game:GetService("TeleportService")
+	local Players = game:GetService("Players")
+	local GuiService = game:GetService("GuiService")
+	local Player = Players.LocalPlayer or Players.PlayerAdded:Wait()
+
+	local rejoining=false
+	local function attempt()
+		pcall(function()
+			TeleportService:Teleport(game.PlaceId, Player)
+		end)
+		task.delay(10, function()
+			attempt()
+		end)
+	end
+
+	GuiService.ErrorMessageChanged:Connect(function(errorMessage)
+		if errorMessage and errorMessage ~= "" then
+			print("Error detected: " .. errorMessage)
+			if not rejoining then
+				rejoining=true
+				task.wait(1)
+				attempt()
+			end
+		end
+	end)
+end)
+
 do
-	local queueFunc = queue_on_teleport
-		or queueonteleport
-		or (syn and syn.queue_on_teleport)
-		or (fluxus and fluxus.queue_on_teleport)
-		or (getgenv and getgenv().queue_on_teleport)
+	local G = _G
+	local queueFunc = rawget(G, "queue_on_teleport")
+		or rawget(G, "queueonteleport")
+		or (rawget(G, "syn") and rawget(syn, "queue_on_teleport"))
+		or (rawget(G, "fluxus") and rawget(fluxus, "queue_on_teleport"))
+		or (type(getgenv)=="function" and getgenv().queue_on_teleport)
 
 	if queueFunc then
 		local payload =
@@ -791,27 +1045,55 @@ U.model.MouseButton1Click:Connect(function()
 		setStatus(ok and ("Model: "..CFG.MODELS[S.curModel].name.." ("..n..")") or "model error")
 	end)
 end)
+U.farmMode.MouseButton1Click:Connect(function()
+	if S.farm then setStatus("turn off Auto Farm before changing mode") return end
+	local modes={"fc","af","pc"}
+	local idx=1
+	for i,m in ipairs(modes) do if m==S.farmMode then idx=i break end end
+	idx=idx%#modes+1
+	S.farmMode=modes[idx]
+	saveFarmMode(S.farmMode)
+	updFarmMode()
+	setStatus("Farm mode: "..(FARM_MODES[S.farmMode] or "?"))
+end)
 U.farm.MouseButton1Click:Connect(function()
 	if not S.model then setStatus("model not loaded") return end
 	setFarm(not S.farm)
 end)
-U.farmBox.MouseButton1Click:Connect(function() setFarm(false) end)
+U.farmBox.MouseButton1Click:Connect(function()
+	if S.lobbyMode and S.farm then
+		S.lobbyInterrupt=true
+		setFarm(false)
+	else
+		setFarm(false)
+	end
+end)
 U.atc.MouseButton1Click:Connect(function() S.atc=not S.atc; S.atcTok+=1; updATC() end)
 U.restart.MouseButton1Click:Connect(function() S.restart=not S.restart; updRestart() end)
 U.close.MouseButton1Click:Connect(function()
 	setESP(false); setFly(false)
 	if S.feed then S.feed=false; S.feedTok+=1 end
 	if S.ai then setAI(false) end
-	S.farm=false; saveFarm(false); S.atc=false
+	S.farm=false; saveFarm(false); S.atc=false; S.lobbyMode=false; S.lobbySeq=false
 	U.farmGui.Enabled=false
 	U.gui.Enabled=false
 end)
 
 player.CharacterAdded:Connect(function(c) local h=c:WaitForChild("Humanoid",5); if h then h.WalkSpeed=S.walk end end)
 
-updWalk(); updFly(); updESP(); updFeed(); updAI(); updModel(); updFarm(); updATC(); updRestart()
+S.farmMode=loadFarmMode()
+updWalk(); updFly(); updESP(); updFeed(); updAI(); updModel(); updFarmMode(); updFarm(); updATC(); updRestart()
 setStatus("Idle"); applyWalk()
 
 if loadFarm() then
-	setFarm(true)
+	task.spawn(function()
+		local guard=0
+		while guard<100 do
+			guard+=1
+			if workspace:FindFirstChild("Lobby") or workspace:FindFirstChild("Plane") or workspace:FindFirstChild(CFG.PLANE) then break end
+			task.wait(0.1)
+		end
+		task.wait(0.3)
+		setFarm(true)
+	end)
 end
