@@ -14,11 +14,11 @@ local supportedGames = {
         url = "https://raw.githubusercontent.com/expure/multitoolroblox/refs/heads/main/SMS.lua",
         name = "Strongman Simulator"
     },
-    [7466405192] = {
+    [2907962276] = {
         url = "https://raw.githubusercontent.com/expure/multitoolroblox/refs/heads/main/SSE2.lua",
         name = "Solar System Exploration 2"
     },
-    [78496323189083] = {
+    [9419242500] = {
         url = "https://raw.githubusercontent.com/expure/multitoolroblox/refs/heads/main/CI.lua",
         name = "Cat Invasion"
     },
@@ -508,11 +508,9 @@ local function createKeyGUI()
         local inputKey = trim(keyBox.Text)
         if inputKey == getCorrectKey() then
             keyVerified = true
-            
             if writefile then
                 writefile("key.active", "")
             end
-            
             createNotification("Key verified! Loading...", 1.5)
             task.wait(1.5)
             gui:Destroy()
