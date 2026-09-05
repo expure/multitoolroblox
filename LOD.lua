@@ -9,16 +9,12 @@ local STATE_FILE="AIPilotFarmState.txt"
 local MODE_FILE="AIPilotFarmMode.txt"
 local SCRIPT_URL="https://raw.githubusercontent.com/expure/multitoolroblox/refs/heads/main/LOD.lua"
 
-local FARM_MODES={
- fc="Feed&Control",
- af="Always Feed",
- pc="Prioritise Control",
-}
+local FARM_MODES={ fc="Feed&Control", af="Always Feed", pc="Prioritise Control" }
 
 local CFG={
  SRC=SCRIPT_URL, PLANE="Plane", PASS="Passengers", FOOD="FoodCrate",
  A_TAKE="Take Food", A_FEED="Feed", A_TALK="Talk to Passenger", A_PICK="Pickup Delivery", A_ICE="Break Ice", A_SEAT="Seat",
- ICE_N=6, ICE_D=0.01, PASSOUT=10, ROLLMAX=30, FOODBUF=6, LOBBY_INT=7,
+ ICE_N=6, ICE_D=0.01, PASSOUT=10, ROLLMAX=30, FOODBUF=6, LOBBY_INT=7, GROUND=108, TOUCH=5,
  AMT={"Plane","FoodCrate","FoodCrate","Part","SurfaceGui","Frame","Amount"},
  SCAN=0.08, WMIN=0, WMAX=200, WDEF=16, FLYM=10, FLYL=0.6, FLYB=2, FEEDCD=0.132,
  PURW=0.2, DELW=0.54, PICKW=0.066, TSD=0.017, TTIME=1.5,
@@ -26,7 +22,7 @@ local CFG={
   {name="Default (By EXVS)", url="https://raw.githubusercontent.com/expure/multitoolroblox/refs/heads/main/AIPilotModel.json"},
   {name="Smooth (BETA By Rzeinil)", url="https://raw.githubusercontent.com/expure/multitoolroblox/refs/heads/main/AIModelPilot-by-Rzeinil.json"},
  },
- MODFILE="AIPilotModel.json", HOLD=7500, LANDDIST=50, TD=5, FLARE=2.5, KNN=7,
+ MODFILE="AIPilotModel.json", HOLD=7500, LANDDIST=50, TD=5,
  HDZ=15, LDZ=12, KREF=3, ROLL=1, YAW=1, ATC=2,
  KEYS={W=Enum.KeyCode.W,A=Enum.KeyCode.A,S=Enum.KeyCode.S,D=Enum.KeyCode.D},
  BEAM="PassengerESPBeam", TATT="PassengerESP_TorsoAttachment", RATT="PassengerESP_RootAttachment",
@@ -38,7 +34,7 @@ local S={
  walk=16, restart=false, farm=false, farmMode="fc",
  ai=false, model=nil, curModel=1, landing=false, distT=0, yaw=nil,
  aip={W=false,A=false,S=false,D=false}, aih={W=0,A=0,S=0,D=0},
- aAlt=nil, aAltT=0, aVS=0, aLandT=0, sAGL=1, sI=1, aM=nil, aMT=0, aMPS=0.3,
+ aAlt=nil, aAltT=0, aVS=0, aLandT=0, aM=nil, aMT=0, aMPS=0.3,
  atc=false, atcTok=0,
  lobbyMode=false, lobbyInterrupt=false, lobbySeq=false,
  active={}, tAtt=nil, tCur=nil, flyConn=nil,
@@ -115,6 +111,13 @@ local function fastTeleport(part,off)
 	end
 	root.CFrame=goal; task.wait(0.03); return true
 end
+local function teleportToTablet()
+	local tab=playerGui:FindFirstChild("Tablet")
+	if not tab then return false end
+	local target=tab.Adornee or tab:FindFirstChildWhichIsA("BasePart") or tab:FindFirstChildWhichIsA("Model")
+	if target then return teleport(target, Vector3.new(0,3,0)) end
+	return false
+end
 
 do
 	local o=playerGui:FindFirstChild("PassengerESPGui"); if o then o:Destroy() end
@@ -171,9 +174,7 @@ local function updFarm() U.farm.Text=S.farm and "AUTO FARM: ON" or "AUTO FARM: O
 local function updATC() U.atc.Text=S.atc and "AUTO ATC: ON" or "AUTO ATC: OFF"; U.atc.BackgroundColor3=S.atc and Color3.fromRGB(60,180,120) or Color3.fromRGB(110,80,140) end
 local function updRestart() U.restart.Text=S.restart and "RESTART AFTER LAND: ON" or "RESTART AFTER LAND: OFF"; U.restart.BackgroundColor3=S.restart and Color3.fromRGB(60,180,120) or Color3.fromRGB(110,80,140) end
 
-local function isLobby()
-	return workspace:FindFirstChild("Lobby") ~= nil
-end
+local function isLobby() return workspace:FindFirstChild("Lobby") ~= nil end
 local function getLobbyMatchmaking()
 	local lobby=workspace:FindFirstChild("Lobby")
 	if not lobby then return nil end
@@ -224,8 +225,7 @@ local function setFarm(st)
 	U.gui.Enabled = not st
 	U.farmGui.Enabled = st
 	if not st then
-		S.lobbyMode=false
-		S.lobbyInterrupt=true
+		S.lobbyMode=false; S.lobbyInterrupt=true
 		setFarmBoxNormal()
 		setStatus("Auto Farm: OFF")
 	else
@@ -235,12 +235,9 @@ end
 
 local function runLobbySeq()
 	if S.lobbySeq then return end
-	S.lobbySeq=true
-	S.lobbyMode=true
-	S.lobbyInterrupt=false
+	S.lobbySeq=true; S.lobbyMode=true; S.lobbyInterrupt=false
 	setFarmBoxInterrupt(CFG.LOBBY_INT)
 	setStatus("Lobby: interrupt window open")
-
 	local start=tick()
 	while S.farm and S.lobbyMode and (tick()-start)<CFG.LOBBY_INT do
 		local rem=CFG.LOBBY_INT-(tick()-start)
@@ -248,56 +245,38 @@ local function runLobbySeq()
 		setFarmBoxInterrupt(rem)
 		task.wait(0.05)
 	end
-
 	if not S.farm or S.lobbyInterrupt then
-		S.lobbyMode=false
-		S.lobbySeq=false
+		S.lobbyMode=false; S.lobbySeq=false
 		setFarmBoxNormal()
 		if not S.farm then U.farmGui.Enabled=false; U.gui.Enabled=true end
 		setStatus("Lobby: interrupted")
 		return
 	end
-
 	setFarmBoxNormal()
 	setStatus("Lobby: waiting for Host.Visible=false")
-
 	local guard=0
 	while S.farm and guard<600 do
 		guard+=1
 		if not getHostVisible() then break end
 		task.wait(0.2)
 	end
-
 	if not S.farm then S.lobbySeq=false; S.lobbyMode=false; return end
-
 	local ep=getLobbyEntryPoint()
 	if ep then
 		setStatus("Lobby: teleporting to EntryPoint")
 		fastTeleport(ep, Vector3.new(0,3,0))
 	end
-
 	task.wait(0.5)
-
 	local mm=getLobbyMatchmaking()
 	if mm then
 		local ch=mm:GetChildren()
 		local target=(#ch>=4) and ch[4] or mm
 		setStatus("Lobby: firing Matchmaking remote")
 		pcall(function()
-			RS:WaitForChild("Matchmaking"):FireServer(
-				"start",
-				target,
-				{
-					difficulty = "Extreme",
-					player_cap = 1,
-					gamemode = "Classic",
-					friends_only = true
-				}
-			)
+			RS:WaitForChild("Matchmaking"):FireServer("start", target, {difficulty="Extreme", player_cap=1, gamemode="Classic", friends_only=true})
 		end)
 		setStatus("Lobby: matchmaking requested, waiting for teleport")
 	end
-
 	S.lobbyMode=false
 end
 
@@ -307,11 +286,16 @@ task.spawn(function()
 			if S.lobbySeq then S.lobbySeq=false end
 			if S.lobbyMode then S.lobbyMode=false end
 		else
-			if S.farm and not S.lobbySeq then
-				runLobbySeq()
-			end
+			if S.farm and not S.lobbySeq then runLobbySeq() end
 		end
-		task.wait(0.5)
+		task.wait(0.3)
+	end
+end)
+
+workspace.ChildAdded:Connect(function(child)
+	if child.Name=="Lobby" then
+		task.wait(0.2)
+		if S.farm and not S.lobbySeq then runLobbySeq() end
 	end
 end)
 
@@ -434,12 +418,15 @@ local function fireSH(i,c) local r=getSH(); if not r then return false end; retu
 
 local function parseAmt(t) if typeof(t)~="string" then return nil end; local n=tonumber(t); if n then return n end; local m={t:match("(%d+)")}; return m[1] and tonumber(m[1]) end
 local function foodAmt()
-	local cur=workspace
-	for _,n in ipairs(CFG.AMT) do if not cur then cur=nil break end; cur=cur:FindFirstChild(n) end
-	if cur then local ok,t=pcall(function() return cur.Text end); if ok then local n=parseAmt(t); if n then return n end end end
-	local p=workspace:FindFirstChild(CFG.PLANE); local c=p and p:FindFirstChild(CFG.FOOD)
-	if c then local a=c:FindFirstChild("Amount",true); if a then local ok,t=pcall(function() return a.Text end); if ok then return parseAmt(t) end end end
-	return nil
+	local p=workspace:FindFirstChild(CFG.PLANE)
+	if not p then return nil end
+	local fc=p:FindFirstChild(CFG.FOOD) or p:FindFirstChild("FoodCrate",true)
+	if not fc then return nil end
+	local a=fc:FindFirstChild("Amount",true)
+	if not a then return nil end
+	local ok,t=pcall(function() return a.Text end)
+	if not ok then return nil end
+	return parseAmt(t)
 end
 local function foodTargets()
 	local p=workspace:FindFirstChild(CFG.PLANE); local c=p and p:FindFirstChild(CFG.FOOD)
@@ -513,7 +500,6 @@ local function allPassengers()
 	return list
 end
 
--- еда: Sandwich
 local function countSandwiches()
 	local n=0
 	local bp=player:FindFirstChild("Backpack")
@@ -543,6 +529,7 @@ end
 local function hasTool() return countSandwiches()>0 end
 
 local function restock(tok)
+	teleportToTablet()
 	local before=foodAmt() or 0
 	if not fireSH("sandwich","miles") then task.wait(0.132) return false end
 	task.wait(CFG.PURW)
@@ -566,35 +553,48 @@ local function restock(tok)
 	return false
 end
 
--- ИСПРАВЛЕНО: before считаем ДО отправки, ОДИН запрос Take Food = 1 еда
+-- ОТЛАДКА: печатает сколько еды видит
 local function takeFood(tok)
+	local amt=foodAmt()
+	local before=countSandwiches()
+	print(string.format("[FOOD] takeFood: crate=%s bag_before=%d", tostring(amt), before))
 	local t=foodTargets(); if #t==0 then return false end
 	local target=t[math.random(1,#t)]; local tp=partOf(target); if not tp then return false end
 	teleport(tp,Vector3.new(0,3,0)); task.wait(0.034)
 	local un=camLock(tp)
-	local before=countSandwiches()
 	fireTT(CFG.A_TAKE,target); un()
 	local st=tick()
 	while tick()-st<2 do
-		if countSandwiches()>before then return true end
+		if countSandwiches()>before then
+			print("[FOOD] took 1, bag="..countSandwiches())
+			return true
+		end
 		task.wait(0.05)
 	end
-	return countSandwiches()>before
+	print("[FOOD] take FAILED, bag="..countSandwiches())
+	return false
 end
 
--- ИСПРАВЛЕНО: берём еду ТОЛЬКО если 0, и ровно ОДИН запрос Take Food
+-- ОТЛАДКА + фикс: не брать из пустого ящика
 local function ensureFood(tok)
-	if countSandwiches()>0 then return equipSandwich() end
-	if #foodTargets()>0 then
+	local sand=countSandwiches()
+	local amt=foodAmt()
+	print(string.format("[FOOD] sandwiches(in bag)=%d | crate Amount=%s", sand, tostring(amt)))
+	if sand>0 then return equipSandwich() end
+	if not amt or amt<=0 then
+		collectCrates(tok)
+		amt=foodAmt()
+		print("[FOOD] after collectCrates -> crate Amount="..tostring(amt))
+	end
+	if not amt or amt<=0 then
+		restock(tok)
+		amt=foodAmt()
+		print("[FOOD] after restock -> crate Amount="..tostring(amt))
+	end
+	if amt and amt>0 then
 		takeFood(tok)
 	else
-		collectCrates(tok)
-		if #foodTargets()>0 then
-			takeFood(tok)
-		else
-			restock(tok)
-			takeFood(tok)
-		end
+		print("[FOOD] crate empty -> NOT taking")
 	end
 	return equipSandwich()
 end
@@ -602,7 +602,7 @@ end
 local function feedOne(pm,tok)
 	if not equipSandwich() then return false end
 	local pr=pm:FindFirstChild("HumanoidRootPart") or getRootPart(pm); if not pr then return false end
-	teleport(pr,Vector3.new(0,1,2)); task.wait(0.034)
+	teleport(pr,Vector3.new(0,0.5,1)); task.wait(0.034)
 	for _=1,CFG.ICE_N do fireTT(CFG.A_ICE,pm); task.wait(CFG.ICE_D) end
 	local un=camLock(pr)
 	fireTT(CFG.A_FEED,pm); fireTT(CFG.A_FEED,pr)
@@ -674,28 +674,91 @@ local function aiRefresh(dt)
 		else S.aih[n]=0 end
 	end
 end
-local function glide(m)
-	local I=0; local prev=0
-	local pts={{1,0.4},{2.5,3},{5,10},{7,32},{12,55},{22,120},{34,240},{math.huge,320}}
-	for _,p in ipairs(pts) do
-		local up=math.min(m,p[1])
-		if up>prev then I=I+(up-prev)*p[2]; prev=up end
-		if m<=p[1] then break end
+
+local function modelGround() return CFG.GROUND end
+
+local function normKeys(t)
+	local out={}
+	for k,v in pairs(t) do
+		if type(k)=="string" then out[k:gsub("^%s+",""):gsub("%s+$","")]=v else out[k]=v end
 	end
-	return I
+	return out
 end
+
+local function detectCols(frames,interval)
+	local n=#frames[1]
+	local altC=nil; local bestDrop=-math.huge
+	for c=1,n do
+		local s=frames[1][c]; local e=frames[#frames][c]
+		if type(s)=="number" and type(e)=="number" then
+			local d=s-e
+			if d>bestDrop then bestDrop=d; altC=c end
+		end
+	end
+	if not altC then return nil,nil end
+	local vsC=nil; local bestCorr=-2
+	for c=1,n do
+		if c~=altC then
+			local num,d1,d2=0,0,0
+			for i=1,#frames-1 do
+				local dv=(frames[i+1][altC]-frames[i][altC])/interval
+				local v=frames[i][c]
+				if type(dv)=="number" and type(v)=="number" then num=num+dv*v; d1=d1+dv*dv; d2=d2+v*v end
+			end
+			local corr=(d1>0 and d2>0) and (num/math.sqrt(d1*d2)) or -2
+			if corr>bestCorr then bestCorr=corr; vsC=c end
+		end
+	end
+	return altC,vsC
+end
+local function buildProfile(frames,altC,vsC)
+	local maxAlt=0
+	for _,f in ipairs(frames) do local a=f[altC]; if type(a)=="number" and a>maxAlt then maxAlt=a end end
+	if maxAlt<=0 then maxAlt=12000 end
+	local step=maxAlt/40
+	local sum,cnt={},{}
+	for i=1,41 do sum[i]=0; cnt[i]=0 end
+	for _,f in ipairs(frames) do
+		local a=f[altC]; local v=f[vsC]
+		if type(a)=="number" and type(v)=="number" then
+			local b=math.floor(a/step)+1; b=math.min(math.max(b,1),41)
+			sum[b]=sum[b]+v; cnt[b]=cnt[b]+1
+		end
+	end
+	local prof={}
+	for i=1,41 do prof[i]=(cnt[i]>0) and (sum[i]/cnt[i]) or (prof[i-1] or -40) end
+	return prof,maxAlt
+end
+
 local function loadModel()
 	local md=CFG.MODELS[S.curModel]; local json=nil
 	if md.url~="" then local ok,r=pcall(function() return game:HttpGet(md.url) end); if ok and type(r)=="string" then json=r end end
 	if not json then return false,"model not found" end
 	local ok,m=pcall(function() return HS:JSONDecode(json) end)
-	if not ok or not m or not m.frames then return false,"broken model" end
+	if not ok or type(m)~="table" then return false,"json decode failed" end
+	m=normKeys(m)
+	if type(m.frames)~="table" or #m.frames==0 then return false,"no frames in file" end
+	if type(m.profile)~="table" then
+		local interval=(type(m.meta)=="table" and m.meta.interval) or 0.05
+		local altC,vsC=detectCols(m.frames,interval)
+		if altC and vsC then
+			local prof,maxAlt=buildProfile(m.frames,altC,vsC)
+			m.profile=prof
+			m.scales={alt=maxAlt, ground=CFG.GROUND}
+		else
+			return false,"cannot train from dataset"
+		end
+	end
+	if type(m.scales)~="table" then m.scales={} end
+	if not m.scales.ground then m.scales.ground=CFG.GROUND end
+	if not m.scales.alt then m.scales.alt=12000 end
 	S.model=m; return true,#m.frames
 end
 local function desVS(alt)
+	if not S.model or not S.model.scales or not S.model.profile then return -40 end
 	local step=math.max(S.model.scales.alt/40,1)
 	local b=math.floor(alt/step)+1; b=math.min(math.max(b,1),41)
-	return S.model.profile[b]
+	return S.model.profile[b] or -40
 end
 local function sitting()
 	local c=player.Character; if not c then return false end
@@ -711,56 +774,47 @@ local function startLand()
 	local g=ck and ck:FindFirstChild("LandingGear")
 	if g then fireTT("Landing Gear",g) end
 	S.landing=true
-	local m=getMiles() or CFG.LANDDIST
-	S.sAGL=math.max(getAlt()-S.model.scales.ground,1)
-	S.sI=math.max(glide(m)-glide(CFG.TD),1)
 end
+
 local function holdCtl(t,alt)
 	local k={W=false,A=false,S=false,D=false}
-	local pitch=t.Orientation.X; local roll=t.Orientation.Z; local err=alt-CFG.HOLD
-
+	local roll=t.Orientation.Z; local err=alt-CFG.HOLD
 	if math.abs(roll)>60 then local s=(roll>0 and 1 or -1)*CFG.ROLL; if s>0 then k.D=true else k.A=true end; return k end
-
 	local dv=0
-	if err<-2000 then dv=60
-	elseif err<-500 then dv=40
-	elseif err<-100 then dv=20
-	elseif err>3000 then dv=-160
-	elseif err>500 then dv=-80
-	elseif err>100 then dv=-30 end
-
-	if pitch>15 and dv>0 then dv=0 end
-
+	if err<-500 then dv=120
+	elseif err<-100 then dv=40
+	elseif err>500 then dv=-120
+	elseif err>100 then dv=-40 end
 	if S.aVS<dv-CFG.HDZ then k.W=true
 	elseif S.aVS>dv+CFG.HDZ then k.S=true end
-
-	if pitch>25 then k.W=false; k.S=true end
-
 	local st=0
 	if math.abs(roll)>5 then st=(roll>0 and 1 or -1)*CFG.ROLL
 	else local ye=angDiff(t.Orientation.Y,S.yaw or t.Orientation.Y); if math.abs(ye)>12 then st=(ye>0 and 1 or -1)*CFG.YAW end end
 	if st>0 then k.D=true elseif st<0 then k.A=true end
-
 	return k
 end
+
 local function landCtl(t,alt)
-	local st={alt=alt-S.model.scales.ground,pitch=t.Orientation.X,roll=t.Orientation.Z,vs=S.aVS}
+	local g=modelGround()
+	local st={alt=alt-g, roll=t.Orientation.Z, vs=S.aVS}
 	local k={W=false,A=false,S=false,D=false}
 	if math.abs(st.roll)>60 then local s=(st.roll>0 and 1 or -1)*CFG.ROLL; if s>0 then k.D=true else k.A=true end; return k end
-	local m=getMiles(); local dv
-	if m then
-		local rem=math.max(m-CFG.TD,0.5)
+	local m=getMiles()
+	local dv
+	if m and m>0 then
+		local rem=math.max(m-CFG.TOUCH,0.5)
 		local mps=(S.aMPS>0.01) and S.aMPS or 0.3
-		dv=math.clamp(-(st.alt/rem)*mps,-500,60)
-		if st.alt>30 then dv=math.max(dv,-math.max(st.alt*0.6,2)) end
+		dv=-(st.alt/rem)*mps
+		if dv>60 then dv=60 end
+		if dv<-500 then dv=-500 end
 	else
-		dv=desVS(st.alt) or -40
+		dv=desVS(st.alt)
 	end
-	if st.alt<=30 then dv=math.clamp(dv,-20,-6) end
-	local dz=math.clamp(st.alt*0.1,3,CFG.LDZ)
-	if S.aVS>dv+dz then k.S=true; k.W=false elseif S.aVS<dv-dz then k.W=true; k.S=false end
+	if S.aVS>dv+CFG.LDZ then k.S=true; k.W=false
+	elseif S.aVS<dv-CFG.LDZ then k.W=true; k.S=false end
 	return k
 end
+
 local function setAI(st)
 	if st==S.ai then return end
 	S.ai=st
@@ -791,15 +845,12 @@ task.spawn(function()
 					local k=S.landing and landCtl(t,alt) or holdCtl(t,alt)
 					for kk,v in pairs(k) do aiKey(kk,v) end
 					aiRefresh(0.05)
-					if S.landing and (alt-S.model.scales.ground)<5 and math.abs(S.aVS)<10 then
+					if S.landing and (alt-modelGround())<5 and math.abs(S.aVS)<10 then
 						S.aLandT=S.aLandT+0.05
 						if S.aLandT>2 then
 							setStatus("Landing complete"); setAI(false); S.aLandT=0
 							if S.restart then
-								task.spawn(function()
-									task.wait(1)
-									pcall(function() player:Respawn() end)
-								end)
+								task.spawn(function() task.wait(1); pcall(function() player:Respawn() end) end)
 							end
 						end
 					else S.aLandT=0 end
@@ -815,13 +866,9 @@ local function farmFeedFC(onlyOne)
 	local h=player.Character and player.Character:FindFirstChildOfClass("Humanoid")
 	if h then pcall(function() h.Sit=false end) end
 	local tok=S.feedTok+1; S.feedTok=tok; S.feed=true
-
 	if onlyOne then
 		local pr,pm=worstPriority()
-		if pm and pr>0 then
-			ensureFood(tok)
-			feedOne(pm,tok)
-		end
+		if pm and pr>0 then ensureFood(tok); feedOne(pm,tok) end
 	else
 		local guard=0
 		while S.farm and guard<60 do
@@ -832,7 +879,6 @@ local function farmFeedFC(onlyOne)
 			feedOne(pm,tok)
 		end
 	end
-
 	S.feed=false; updFeed()
 	sitInSeat(getPilotSeat())
 end
@@ -841,13 +887,8 @@ local function farmFeedPC()
 	local h=player.Character and player.Character:FindFirstChildOfClass("Humanoid")
 	if h then pcall(function() h.Sit=false end) end
 	local tok=S.feedTok+1; S.feedTok=tok; S.feed=true
-
 	local pr,pm=worstPriority()
-	if pm and pr>=4 then
-		ensureFood(tok)
-		feedOne(pm,tok)
-	end
-
+	if pm and pr>=4 then ensureFood(tok); feedOne(pm,tok) end
 	S.feed=false; updFeed()
 	sitInSeat(getPilotSeat())
 end
@@ -856,14 +897,11 @@ local function farmFeedAF()
 	local h=player.Character and player.Character:FindFirstChildOfClass("Humanoid")
 	if h then pcall(function() h.Sit=false end) end
 	local tok=S.feedTok+1; S.feedTok=tok; S.feed=true
-
-	local passengers=allPassengers()
-	for _,pm in ipairs(passengers) do
+	for _,pm in ipairs(allPassengers()) do
 		if not S.farm then break end
 		if not ensureFood(tok) then break end
 		if not feedOne(pm,tok) then continue end
 	end
-
 	S.feed=false; updFeed()
 end
 
@@ -871,7 +909,6 @@ task.spawn(function()
 	while true do
 		if S.farm and not S.lobbyMode and not S.lobbySeq then
 			local mode=S.farmMode
-
 			if mode=="af" then
 				setStatus("Always Feed: feeding all passengers")
 				farmFeedAF()
@@ -881,8 +918,7 @@ task.spawn(function()
 				local pr,_=worstPriority()
 				if pr>=4 then
 					setStatus("Prioritise Control: feeding stressed")
-					setAI(false)
-					farmFeedPC()
+					setAI(false); farmFeedPC()
 					if S.farm then setAI(true) end
 				end
 			else
@@ -892,19 +928,13 @@ task.spawn(function()
 				local t=planeTorso()
 				local roll=t and t.Orientation.Z or 0
 				local tooRoll=math.abs(roll)>CFG.ROLLMAX
-
 				local doFeed=false
-				if pr>=4 then
-					doFeed = (miles~=nil and miles>5)
-				elseif pr>=3 then
-					doFeed = (not S.landing) and (not tooRoll) and (miles~=nil and miles>15)
-				end
-
+				if pr>=4 then doFeed=(miles~=nil and miles>5)
+				elseif pr>=3 then doFeed=(not S.landing) and (not tooRoll) and (miles~=nil and miles>15) end
 				if doFeed then
-					local onlyOne = S.landing or tooRoll
-					setStatus(string.format("Feed&Control: getting up to feed (prio %d, mi %s, roll %.0f)%s", pr, miles and string.format("%.1f",miles) or "?", roll, onlyOne and " [stressed only]" or ""))
-					setAI(false)
-					farmFeedFC(onlyOne)
+					local onlyOne=S.landing or tooRoll
+					setStatus(string.format("Feed&Control: feed (prio %d, mi %s, roll %.0f)%s", pr, miles and string.format("%.1f",miles) or "?", roll, onlyOne and " [stressed only]" or ""))
+					setAI(false); farmFeedFC(onlyOne)
 					if S.farm then setAI(true) end
 				end
 			end
@@ -935,58 +965,44 @@ task.spawn(function()
 end)
 
 task.spawn(function()
-	local TeleportService = game:GetService("TeleportService")
-	local Players = game:GetService("Players")
-	local GuiService = game:GetService("GuiService")
-	local Player = Players.LocalPlayer or Players.PlayerAdded:Wait()
-
+	local TeleportService=game:GetService("TeleportService")
+	local Players=game:GetService("Players")
+	local GuiService=game:GetService("GuiService")
+	local Player=Players.LocalPlayer or Players.PlayerAdded:Wait()
 	local rejoining=false
 	local function attempt()
-		pcall(function()
-			TeleportService:Teleport(game.PlaceId, Player)
-		end)
-		task.delay(10, function()
-			attempt()
-		end)
+		pcall(function() TeleportService:Teleport(game.PlaceId, Player) end)
+		task.delay(10, function() attempt() end)
 	end
-
 	GuiService.ErrorMessageChanged:Connect(function(errorMessage)
-		if errorMessage and errorMessage ~= "" then
-			print("Error detected: " .. errorMessage)
-			if not rejoining then
-				rejoining=true
-				task.wait(1)
-				attempt()
-			end
+		if errorMessage and errorMessage~="" then
+			print("Error detected: "..errorMessage)
+			if not rejoining then rejoining=true; task.wait(1); attempt() end
 		end
 	end)
 end)
 
 do
-	local G = _G
-	local queueFunc = rawget(G, "queue_on_teleport")
-		or rawget(G, "queueonteleport")
-		or (rawget(G, "syn") and rawget(syn, "queue_on_teleport"))
-		or (rawget(G, "fluxus") and rawget(fluxus, "queue_on_teleport"))
+	local G=_G
+	local queueFunc=rawget(G,"queue_on_teleport") or rawget(G,"queueonteleport")
+		or (rawget(G,"syn") and rawget(syn,"queue_on_teleport"))
+		or (rawget(G,"fluxus") and rawget(fluxus,"queue_on_teleport"))
 		or (type(getgenv)=="function" and getgenv().queue_on_teleport)
-
 	if queueFunc then
-		local payload =
-			'if not game:IsLoaded() then game.Loaded:Wait() end\n' ..
-			'local Players = game:GetService("Players")\n' ..
-			'while not Players.LocalPlayer do task.wait(0.1) end\n' ..
-			'local player = Players.LocalPlayer\n' ..
-			'while not player:FindFirstChild("PlayerGui") or not player.Character do task.wait(0.1) end\n' ..
-			'print("AI Pilot: restarting on new server (network load)")\n' ..
-			'local success, err = pcall(function()\n' ..
-			'    loadstring(game:HttpGet("' .. SCRIPT_URL .. '"))()\n' ..
-			'end)\n' ..
-			'if not success then\n' ..
-			'    warn("AI Pilot Error: " .. tostring(err))\n' ..
-			'end\n'
+		local payload=
+			'if not game:IsLoaded() then game.Loaded:Wait() end\n'..
+			'local Players = game:GetService("Players")\n'..
+			'while not Players.LocalPlayer do task.wait(0.1) end\n'..
+			'local player = Players.LocalPlayer\n'..
+			'while not player:FindFirstChild("PlayerGui") or not player.Character do task.wait(0.1) end\n'..
+			'print("AI Pilot: restarting on new server")\n'..
+			'local success, err = pcall(function()\n'..
+			'    loadstring(game:HttpGet("'..SCRIPT_URL..'"))()\n'..
+			'end)\n'..
+			'if not success then warn("AI Pilot Error: "..tostring(err)) end\n'
 		pcall(queueFunc, payload)
 	else
-		warn("queue_on_teleport not supported by this executor.")
+		warn("queue_on_teleport not supported")
 	end
 end
 
@@ -1041,8 +1057,8 @@ U.model.MouseButton1Click:Connect(function()
 	S.curModel=S.curModel%#CFG.MODELS+1
 	updModel()
 	task.spawn(function()
-		local ok,n=loadModel()
-		setStatus(ok and ("Model: "..CFG.MODELS[S.curModel].name.." ("..n..")") or "model error")
+		local ok,msg=loadModel()
+		setStatus(ok and ("Model: "..CFG.MODELS[S.curModel].name.." ("..msg..")") or ("MODEL FAIL: "..msg))
 	end)
 end)
 U.farmMode.MouseButton1Click:Connect(function()
@@ -1052,8 +1068,7 @@ U.farmMode.MouseButton1Click:Connect(function()
 	for i,m in ipairs(modes) do if m==S.farmMode then idx=i break end end
 	idx=idx%#modes+1
 	S.farmMode=modes[idx]
-	saveFarmMode(S.farmMode)
-	updFarmMode()
+	saveFarmMode(S.farmMode); updFarmMode()
 	setStatus("Farm mode: "..(FARM_MODES[S.farmMode] or "?"))
 end)
 U.farm.MouseButton1Click:Connect(function()
@@ -1061,12 +1076,7 @@ U.farm.MouseButton1Click:Connect(function()
 	setFarm(not S.farm)
 end)
 U.farmBox.MouseButton1Click:Connect(function()
-	if S.lobbyMode and S.farm then
-		S.lobbyInterrupt=true
-		setFarm(false)
-	else
-		setFarm(false)
-	end
+	if S.lobbyMode and S.farm then S.lobbyInterrupt=true; setFarm(false) else setFarm(false) end
 end)
 U.atc.MouseButton1Click:Connect(function() S.atc=not S.atc; S.atcTok+=1; updATC() end)
 U.restart.MouseButton1Click:Connect(function() S.restart=not S.restart; updRestart() end)
@@ -1075,8 +1085,7 @@ U.close.MouseButton1Click:Connect(function()
 	if S.feed then S.feed=false; S.feedTok+=1 end
 	if S.ai then setAI(false) end
 	S.farm=false; saveFarm(false); S.atc=false; S.lobbyMode=false; S.lobbySeq=false
-	U.farmGui.Enabled=false
-	U.gui.Enabled=false
+	U.farmGui.Enabled=false; U.gui.Enabled=false
 end)
 
 player.CharacterAdded:Connect(function(c) local h=c:WaitForChild("Humanoid",5); if h then h.WalkSpeed=S.walk end end)
