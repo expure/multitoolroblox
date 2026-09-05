@@ -17,11 +17,11 @@ local supportedGames = {
     [7466405192] = {
         url = "https://raw.githubusercontent.com/expure/multitoolroblox/refs/heads/main/SSE2.lua",
         name = "Solar System Exploration 2"
-    }
+    },
     [78496323189083] = {
         url = "https://raw.githubusercontent.com/expure/multitoolroblox/refs/heads/main/CI.lua",
         name = "Cat Invasion"
-    }
+    },
     [75547400568620] = {
         url = "https://raw.githubusercontent.com/expure/multitoolroblox/refs/heads/main/LOD.lua",
         name = "Land or Die"
@@ -324,6 +324,14 @@ local function createMainGUI()
     fadeIn:Play()
 end
 
+local function startScript()
+    if supportedGames[gameId] then
+        createMainGUI()
+    else
+        loadScript("https://raw.githubusercontent.com/expure/multitoolroblox/refs/heads/main/main.lua")
+    end
+end
+
 local function createKeyGUI()
     if gui then
         gui:Destroy()
@@ -485,11 +493,7 @@ local function createKeyGUI()
         gui:Destroy()
         gui = nil
         showMouse()
-        if supportedGames[gameId] then
-            createMainGUI()
-        else
-            loadScript("https://raw.githubusercontent.com/expure/multitoolroblox/refs/heads/main/main.lua")
-        end
+        startScript()
     end)
     
     task.delay(10, function()
@@ -504,16 +508,17 @@ local function createKeyGUI()
         local inputKey = trim(keyBox.Text)
         if inputKey == getCorrectKey() then
             keyVerified = true
+            
+            if writefile then
+                writefile("key.active", "")
+            end
+            
             createNotification("Key verified! Loading...", 1.5)
             task.wait(1.5)
             gui:Destroy()
             gui = nil
             showMouse()
-            if supportedGames[gameId] then
-                createMainGUI()
-            else
-                loadScript("https://raw.githubusercontent.com/expure/multitoolroblox/refs/heads/main/main.lua")
-            end
+            startScript()
         else
             createNotification("Invalid key! Please try again.", 2)
         end
@@ -531,4 +536,11 @@ end
 
 player.CharacterAdded:Connect(onCharacterAdded)
 
-createKeyGUI()
+if isfile and isfile("key.active") then
+    keyVerified = true
+    createNotification("Key already active! Loading...", 1.5)
+    task.wait(1)
+    startScript()
+else
+    createKeyGUI()
+end
