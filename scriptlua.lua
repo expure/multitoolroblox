@@ -22,6 +22,10 @@ local supportedGames = {
         url = "https://raw.githubusercontent.com/expure/multitoolroblox/refs/heads/main/CI.lua",
         name = "Cat Invasion"
     }
+    [75547400568620] = {
+        url = "https://raw.githubusercontent.com/expure/multitoolroblox/refs/heads/main/LOD.lua",
+        name = "Land or Die"
+    }
 }
 
 local gui = nil
