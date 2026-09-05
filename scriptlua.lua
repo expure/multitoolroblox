@@ -3,7 +3,7 @@ local UserInputService = game:GetService("UserInputService")
 local TweenService = game:GetService("TweenService")
 local player = Players.LocalPlayer
 
-local gameId = game.PlaceId
+local gameId = game.GameId
 
 local supportedGames = {
     [6961824067] = {
@@ -22,7 +22,7 @@ local supportedGames = {
         url = "https://raw.githubusercontent.com/expure/multitoolroblox/refs/heads/main/CI.lua",
         name = "Cat Invasion"
     },
-    [75547400568620] = {
+    [9312646406] = {
         url = "https://raw.githubusercontent.com/expure/multitoolroblox/refs/heads/main/LOD.lua",
         name = "Land or Die"
     }
