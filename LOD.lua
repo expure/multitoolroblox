@@ -14,16 +14,15 @@ local FARM_MODES={ fc="Feed&Control", af="Always Feed", pc="Prioritise Control" 
 local CFG={
  SRC=SCRIPT_URL, PLANE="Plane", PASS="Passengers", FOOD="FoodCrate",
  A_TAKE="Take Food", A_FEED="Feed", A_TALK="Talk to Passenger", A_PICK="Pickup Delivery", A_ICE="Break Ice", A_SEAT="Seat",
- ICE_N=6, ICE_D=0.01, PASSOUT=10, ROLLMAX=30, LOBBY_INT=7, GROUND=108.6, TOUCH=5,
+ ICE_N=6, ICE_D=0.01, PASSOUT=10, ROLLMAX=30, LOBBY_INT=7, GROUND=108, TOUCH=5,
  FOOD_BUY_THRESHOLD=10, BUY_CRATES=4, FEED_LERP=0.35,
- FEED_SPEED=520, FEED_REACH=8, TAKE_REACH=10, PICK_REACH=12, TABLET_REACH=18,
  AMT={"Plane","FoodCrate","FoodCrate","Part","SurfaceGui","Frame","Amount"},
  SCAN=0.08, WMIN=0, WMAX=200, WDEF=16, FLYM=10, FLYL=0.6, FLYB=2,
  PURW=0.2, DELW=0.54, PICKW=0.066, TSD=0.017, TTIME=1.5,
  MODELS={
   {name="Default (By EXVS)", url="https://raw.githubusercontent.com/expure/multitoolroblox/refs/heads/main/AIPilotModel.json"},
   {name="Smooth (BETA By Rzeinil)", url="https://raw.githubusercontent.com/expure/multitoolroblox/refs/heads/main/AIModelPilot-by-Rzeinil.json"},
-  {name="Smooth V2(BETA By Rzeinil)", url="https://raw.githubusercontent.com/expure/multitoolroblox/refs/heads/main/AIModelPilot-by-Rzeinil-v2"},
+  {name="Smooth V2 (BETA By Rzeinil)", url="https://raw.githubusercontent.com/expure/multitoolroblox/refs/heads/main/AIModelPilot-by-Rzeinil-v2.json"},
  },
  MODFILE="AIPilotModel.json", HOLD=7500, LANDDIST=50, TD=5,
  HDZ=15, LDZ=12, KREF=3, ROLL=1, YAW=1, ATC=2,
@@ -40,7 +39,7 @@ local S={
  aAlt=nil, aAltT=0, aVS=0, aLandT=0, aM=nil, aMT=0, aMPS=0.3,
  atc=false, atcTok=0,
  lobbyMode=false, lobbyInterrupt=false, lobbySeq=false,
- feedTarget=nil, serviced={}, buyRequested=false,
+ feedTarget=nil, pausedLerp=false,
  active={}, tAtt=nil, tCur=nil, flyConn=nil,
 }
 
@@ -90,19 +89,18 @@ local function getPos(i)
 	local r=getRootPart(i); return r and r.Position
 end
 
+-- МГНОВЕННАЯ простая телепортация (без lerp)
 local function teleport(part,off)
 	local root=getRoot(player.Character); local p=getPos(part)
 	if not root or not p then return false end
 	root.CFrame=CFrame.new(p+(off or Vector3.new(0,3,0)))
-	task.wait()
-	return true
+	task.wait(0.03); return true
 end
 local function fastTeleport(part,off)
 	local root=getRoot(player.Character); local p=getPos(part)
 	if not root or not p then return false end
 	root.CFrame=CFrame.new(p+(off or Vector3.new(0,3,0)))
-	task.wait()
-	return true
+	task.wait(0.03); return true
 end
 local function teleportToTablet()
 	local tab=playerGui:FindFirstChild("Tablet")
@@ -112,29 +110,54 @@ local function teleportToTablet()
 	return false
 end
 
--- Непрерывный быстрый полёт через CFrame:Lerp
-RunService.Heartbeat:Connect(function(dt)
-	if not S.feed or not S.feedTarget then return end
-	local char=player.Character
-	if not char then return end
-	local root=getRoot(char)
-	if not root then return end
-
-	local h=char:FindFirstChildOfClass("Humanoid")
-	if h and h.Sit then pcall(function() h.Sit=false end) end
-
-	local p=getPos(S.feedTarget)
-	if not p then return end
-
-	local targetPos=p+Vector3.new(0,1,2)
-	local dist=(root.Position-targetPos).Magnitude
-	if dist < 0.05 then
-		root.CFrame=CFrame.new(targetPos)*root.CFrame.Rotation
-		return
+-- НЕПРЕРЫВНЫЙ CFrame-Lerp полёт к цели кормления, пока S.feed
+task.spawn(function()
+	while true do
+		if S.feed and S.feedTarget and not S.pausedLerp then
+			local root=getRoot(player.Character)
+			local p=getPos(S.feedTarget)
+			if root and p then
+				root.CFrame=root.CFrame:Lerp(CFrame.new(p+Vector3.new(0,0.5,1)), CFG.FEED_LERP)
+			end
+		end
+		task.wait()
 	end
+end)
 
-	local alpha=math.clamp(dt*CFG.FEED_SPEED/math.max(dist,0.001),0,1)
-	root.CFrame=root.CFrame:Lerp(CFrame.new(targetPos)*root.CFrame.Rotation, alpha)
+-- Фоновая закупка и сбор ящиков без остановки полета
+task.spawn(function()
+	while true do
+		if S.feed then
+			local amt = foodAmt()
+			if amt ~= nil and amt <= CFG.FOOD_BUY_THRESHOLD then
+				print("[FOOD] Crate <= " .. CFG.FOOD_BUY_THRESHOLD .. ", buying and collecting on the fly!")
+				for i=1,CFG.BUY_CRATES do
+					fireSH("sandwich","miles")
+				end
+				
+				task.spawn(function()
+					S.pausedLerp = true
+					local list = findAllCrates()
+					for _,c in ipairs(list) do
+						if not S.feed then break end
+						local cp = cratePart(c)
+						if cp then
+							teleport(cp, Vector3.new(0,3,0))
+							task.wait(0.034)
+							local un = camLock(cp)
+							fireTT(CFG.A_PICK, c)
+							task.wait(CFG.PICKW)
+							un()
+						end
+					end
+					S.pausedLerp = false
+				end)
+				
+				task.wait(5) -- Кулдаун, чтобы не спамить закупкой
+			end
+		end
+		task.wait(0.5)
+	end
 end)
 
 do
@@ -470,40 +493,18 @@ local function findCrate()
 	return best
 end
 local function cratePart(c) if c:IsA("BasePart") then return c end; return getRootPart(c) end
-
-local function tabletPos()
-	local tab=playerGui:FindFirstChild("Tablet")
-	if not tab then return nil,nil end
-	local target=tab.Adornee or tab:FindFirstChildWhichIsA("BasePart") or tab:FindFirstChildWhichIsA("Model")
-	if not target then return nil,nil end
-	return target, getPos(target)
-end
-
-local function nearestCrate()
-	local root=getRoot(player.Character)
-	local best=nil; local bp=nil; local bd=math.huge
-	for _,c in ipairs(findAllCrates()) do
-		local p=cratePart(c)
-		if p then
-			local d=root and (root.Position-p.Position).Magnitude or 0
-			if d<bd then bd=d; best=c; bp=p end
+local function collectCrates(tok)
+	local list=findAllCrates()
+	if #list==0 then return false end
+	for _,c in ipairs(list) do
+		if tok and (not S.feed or S.feedTok~=tok) then return true end
+		local cp=cratePart(c); if cp then
+			teleport(cp,Vector3.new(0,3,0)); task.wait(0.034)
+			local un=camLock(cp)
+			fireTT(CFG.A_PICK,c); task.wait(CFG.PICKW); un()
 		end
 	end
-	return best,bp,bd
-end
-
-local function nearestFoodTarget()
-	local root=getRoot(player.Character)
-	local list=foodTargets()
-	local best=nil; local bp=nil; local bd=math.huge
-	for _,x in ipairs(list) do
-		local p=partOf(x)
-		if p then
-			local d=root and (root.Position-p.Position).Magnitude or 0
-			if d<bd then bd=d; best=x; bp=p end
-		end
-	end
-	return best,bp,bd
+	return true
 end
 
 local function prio(t)
@@ -527,13 +528,10 @@ end
 local function worstPriority()
 	local p=workspace:FindFirstChild(CFG.PLANE); local ps=p and p:FindFirstChild(CFG.PASS); if not ps then return 0,nil end
 	local list={}; collectModels(ps,list)
-	if type(S.serviced)~="table" then S.serviced={} end
 	local bp=0; local bm=nil
 	for _,m in ipairs(list) do
 		local pr,rt=pState(m)
-		if pr and pr>0 and rt and S.serviced[m]~=pr and pr>bp then
-			bp=pr; bm=m
-		end
+		if pr and pr>0 and rt and pr>bp then bp=pr; bm=m end
 	end
 	return bp,bm
 end
@@ -571,162 +569,80 @@ local function equipSandwich()
 end
 local function hasTool() return countSandwiches()>0 end
 
-local function maintainFood(tok)
-	if countSandwiches()>0 then return equipSandwich() end
-	local root=getRoot(player.Character)
-	if not root then return false end
+local function restock(tok)
+	teleportToTablet()
+	local before=foodAmt() or 0
+	for i=1,CFG.BUY_CRATES do
+		fireSH("sandwich","miles")
+		task.wait(CFG.PURW)
+	end
+	local st=tick()
+	while tick()-st<CFG.DELW+2 do
+		if tok and (not S.feed or S.feedTok~=tok) then return false end
+		collectCrates(tok)
+		local now=foodAmt()
+		if now and now>before and #findAllCrates()==0 then return true end
+		task.wait(0.1)
+	end
+	return (foodAmt() or 0)>before
+end
 
+local function takeFood(tok)
+	S.pausedLerp = true
+	local success = false
 	local amt=foodAmt()
-	local crate, cp, cd = nearestCrate()
-
-	if crate and cp and (not amt or amt <= 0) then
-		S.feedTarget=cp
-		if cd <= CFG.PICK_REACH then
-			fireTT(CFG.A_PICK, crate)
+	local before=countSandwiches()
+	print(string.format("[FOOD] takeFood: crate=%s bag_before=%d", tostring(amt), before))
+	local t=foodTargets(); 
+	if #t==0 then S.pausedLerp = false; return false end
+	local target=t[math.random(1,#t)]; local tp=partOf(target); 
+	if not tp then S.pausedLerp = false; return false end
+	teleport(tp,Vector3.new(0,3,0)); task.wait(0.034)
+	local un=camLock(tp)
+	fireTT(CFG.A_TAKE,target); un()
+	local st=tick()
+	while tick()-st<2 do
+		if countSandwiches()>before then
+			print("[FOOD] took 1, bag="..countSandwiches())
+			success = true
+			break
 		end
-		return false
+		task.wait(0.05)
 	end
-
-	if amt and amt > 0 then
-		local target, tp, td = nearestFoodTarget()
-		if target and tp then
-			S.feedTarget=tp
-			if td <= CFG.TAKE_REACH then
-				fireTT(CFG.A_TAKE, target)
-			end
-		else
-			local p=workspace:FindFirstChild(CFG.PLANE)
-			local fc=p and p:FindFirstChild(CFG.FOOD)
-			if fc then S.feedTarget=fc end
-		end
-		return false
-	end
-
-	if crate and cp then
-		S.feedTarget=cp
-		if cd <= CFG.PICK_REACH then
-			fireTT(CFG.A_PICK, crate)
-		end
-		return false
-	end
-
-	local tabTarget, tabPos = tabletPos()
-	if tabTarget and tabPos then
-		S.feedTarget=tabTarget
-		local d=(root.Position-tabPos).Magnitude
-		if d <= CFG.TABLET_REACH and not S.buyRequested then
-			S.buyRequested=true
-			for _=1,CFG.BUY_CRATES do
-				fireSH("sandwich","miles")
-			end
-		end
-	end
-
-	return false
+	if not success then print("[FOOD] take FAILED, bag="..countSandwiches()) end
+	S.pausedLerp = false
+	return success
 end
 
--- Покупка и подбор ящиков на лету, без остановок
-task.spawn(function()
-	while true do
-		if S.feed then
-			local root=getRoot(player.Character)
-			if root then
-				local amt=foodAmt()
-				if amt==nil then S.buyRequested=false end
-				if amt and amt > CFG.FOOD_BUY_THRESHOLD then S.buyRequested=false end
-
-				local tabTarget, tabPos = tabletPos()
-				if tabTarget and tabPos then
-					local d=(root.Position-tabPos).Magnitude
-					if d <= CFG.TABLET_REACH then
-						if amt and amt <= CFG.FOOD_BUY_THRESHOLD and #findAllCrates()==0 and not S.buyRequested then
-							S.buyRequested=true
-							for _=1,CFG.BUY_CRATES do
-								fireSH("sandwich","miles")
-							end
-						end
-					elseif d > CFG.TABLET_REACH + 25 then
-						S.buyRequested=false
-					end
-				end
-
-				for _,c in ipairs(findAllCrates()) do
-					local cp=cratePart(c)
-					if cp and (root.Position-cp.Position).Magnitude <= CFG.PICK_REACH then
-						fireTT(CFG.A_PICK,c)
-					end
-				end
-			end
-		end
-		task.wait()
-	end
-end)
-
-local function waitForFood(tok)
-	while S.feed and (not tok or S.feedTok==tok) do
-		if countSandwiches()>0 then return equipSandwich() end
-		maintainFood(tok)
-		task.wait()
-	end
-	return false
+local function ensureFood(tok)
+	local sand=countSandwiches()
+	local amt=foodAmt()
+	print(string.format("[FOOD] bag=%d | crate=%s", sand, tostring(amt)))
+	
+	if countSandwiches()>0 then return equipSandwich() end
+	if amt and amt>0 then takeFood(tok) end
+	return equipSandwich()
 end
 
-local function feedPassengerContinuous(pm,tok)
-	if tok and (not S.feed or S.feedTok~=tok) then return false end
-	if countSandwiches()==0 and not waitForFood(tok) then return false end
+-- кормление: ставит цель для непрерывного lerp-полёта и шлёт ивенты
+local function feedOne(pm,tok)
 	if not equipSandwich() then return false end
-
-	local pr=pm:FindFirstChild("HumanoidRootPart") or getRootPart(pm)
-	if not pr then return false end
-
+	local pr=pm:FindFirstChild("HumanoidRootPart") or getRootPart(pm); if not pr then return false end
 	S.feedTarget=pr
-
-	while S.feed and (not tok or S.feedTok==tok) do
-		if countSandwiches()==0 then return false end
-
-		local root=getRoot(player.Character)
-		local p=getPos(pr)
-		if not root or not p then return false end
-
-		if (root.Position-p).Magnitude <= CFG.FEED_REACH then
-			if not equipSandwich() then return false end
-
-			for _=1,CFG.ICE_N do fireTT(CFG.A_ICE,pm) end
-			fireTT(CFG.A_FEED,pm); fireTT(CFG.A_FEED,pr)
-			fireTT(CFG.A_TALK,pm); fireTT(CFG.A_TALK,pr)
-			return true
-		end
-
-		task.wait()
-	end
-
-	return false
+	for _=1,CFG.ICE_N do fireTT(CFG.A_ICE,pm); task.wait(CFG.ICE_D) end
+	fireTT(CFG.A_FEED,pm); fireTT(CFG.A_FEED,pr)
+	fireTT(CFG.A_TALK,pm); fireTT(CFG.A_TALK,pr)
+	return true
 end
-
 local function feedLoop(tok)
 	if S.fly then setFly(false) end
-	S.serviced={}
-
 	while S.feed and S.feedTok==tok do
-		if not getRoot(player.Character) then task.wait() continue end
-
-		local pr,pm=worstPriority()
-		if not pm then
-			S.feedTarget=nil
-			task.wait()
-			continue
-		end
-
-		if feedPassengerContinuous(pm,tok) then
-			S.serviced[pm]=pr
-		else
-			task.wait()
-		end
-
-		task.wait()
+		if not getRoot(player.Character) then task.wait(0.066) continue end
+		local _,pm=worstPriority()
+		if not pm then task.wait(0.334) continue end
+		if not ensureFood(tok) then task.wait(0.066) continue end
+		feedOne(pm,tok)
 	end
-
-	S.feedTarget=nil
 	updFeed()
 end
 
@@ -738,7 +654,7 @@ local function getPilotSeat()
 end
 local function sitInSeat(seat)
 	if not seat then return end
-	teleport(seat,Vector3.new(0,2,0)); task.wait()
+	teleport(seat,Vector3.new(0,2,0)); task.wait(0.034)
 	local h=player.Character and player.Character:FindFirstChildOfClass("Humanoid")
 	if h then pcall(function() seat:Sit(h) end) end
 	fireTT(CFG.A_SEAT,seat)
@@ -782,7 +698,7 @@ local function aiRefresh(dt)
 	end
 end
 
-local function modelGround() return 108.6 end
+local function modelGround() return CFG.GROUND end
 
 local function normKeys(t)
 	local out={}
@@ -972,24 +888,20 @@ end)
 local function farmFeedFC(onlyOne)
 	local h=player.Character and player.Character:FindFirstChildOfClass("Humanoid")
 	if h then pcall(function() h.Sit=false end) end
-	local tok=S.feedTok+1; S.feedTok=tok; S.feed=true; S.serviced={}
-
+	local tok=S.feedTok+1; S.feedTok=tok; S.feed=true
 	if onlyOne then
 		local pr,pm=worstPriority()
-		if pm and pr>0 and feedPassengerContinuous(pm,tok) then
-			S.serviced[pm]=pr
-		end
+		if pm and pr>0 then ensureFood(tok); feedOne(pm,tok) end
 	else
 		local guard=0
-		while S.farm and guard<120 do
+		while S.farm and guard<60 do
 			guard+=1
 			local pr,pm=worstPriority()
 			if not pm or pr<=0 then break end
-			if not feedPassengerContinuous(pm,tok) then break end
-			S.serviced[pm]=pr
+			if not ensureFood(tok) then break end
+			feedOne(pm,tok)
 		end
 	end
-
 	S.feed=false; S.feedTarget=nil; updFeed()
 	sitInSeat(getPilotSeat())
 end
@@ -997,13 +909,9 @@ end
 local function farmFeedPC()
 	local h=player.Character and player.Character:FindFirstChildOfClass("Humanoid")
 	if h then pcall(function() h.Sit=false end) end
-	local tok=S.feedTok+1; S.feedTok=tok; S.feed=true; S.serviced={}
-
+	local tok=S.feedTok+1; S.feedTok=tok; S.feed=true
 	local pr,pm=worstPriority()
-	if pm and pr>=4 and feedPassengerContinuous(pm,tok) then
-		S.serviced[pm]=pr
-	end
-
+	if pm and pr>=4 then ensureFood(tok); feedOne(pm,tok) end
 	S.feed=false; S.feedTarget=nil; updFeed()
 	sitInSeat(getPilotSeat())
 end
@@ -1011,13 +919,12 @@ end
 local function farmFeedAF()
 	local h=player.Character and player.Character:FindFirstChildOfClass("Humanoid")
 	if h then pcall(function() h.Sit=false end) end
-	local tok=S.feedTok+1; S.feedTok=tok; S.feed=true; S.serviced={}
-
+	local tok=S.feedTok+1; S.feedTok=tok; S.feed=true
 	for _,pm in ipairs(allPassengers()) do
 		if not S.farm then break end
-		feedPassengerContinuous(pm,tok)
+		if not ensureFood(tok) then break end
+		if not feedOne(pm,tok) then continue end
 	end
-
 	S.feed=false; S.feedTarget=nil; updFeed()
 end
 
