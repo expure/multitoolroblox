@@ -2,6 +2,7 @@ local Players=game:GetService("Players"); local RunService=game:GetService("RunS
 local UIS=game:GetService("UserInputService"); local RS=game:GetService("ReplicatedStorage");
 local SG=game:GetService("StarterGui"); local HS=game:GetService("HttpService");
 local GuiService=game:GetService("GuiService"); local TS=game:GetService("TeleportService");
+local TweenService=game:GetService("TweenService");
 local player=Players.LocalPlayer
 local playerGui=player:WaitForChild("PlayerGui")
 
@@ -14,15 +15,13 @@ local FARM_MODES={ fc="Feed&Control", af="Always Feed", pc="Prioritise Control" 
 local CFG={
  SRC=SCRIPT_URL, PLANE="Plane", PASS="Passengers", FOOD="FoodCrate",
  A_TAKE="Take Food", A_FEED="Feed", A_TALK="Talk to Passenger", A_PICK="Pickup Delivery", A_ICE="Break Ice", A_SEAT="Seat",
- ICE_N=6, ICE_D=0.01, PASSOUT=10, ROLLMAX=30, LOBBY_INT=7, GROUND=108, TOUCH=5,
- FOOD_BUY_THRESHOLD=10, BUY_CRATES=4, FEED_LERP=0.35,
+ ICE_N=6, ICE_D=0.01, PASSOUT=10, ROLLMAX=30, FOODBUF=6, LOBBY_INT=7, GROUND=108, TOUCH=5, FEED_TWEEN=0.2,
  AMT={"Plane","FoodCrate","FoodCrate","Part","SurfaceGui","Frame","Amount"},
  SCAN=0.08, WMIN=0, WMAX=200, WDEF=16, FLYM=10, FLYL=0.6, FLYB=2,
  PURW=0.2, DELW=0.54, PICKW=0.066, TSD=0.017, TTIME=1.5,
  MODELS={
   {name="Default (By EXVS)", url="https://raw.githubusercontent.com/expure/multitoolroblox/refs/heads/main/AIPilotModel.json"},
   {name="Smooth (BETA By Rzeinil)", url="https://raw.githubusercontent.com/expure/multitoolroblox/refs/heads/main/AIModelPilot-by-Rzeinil.json"},
-  {name="Smooth V2(BETA By Rzeinil)", url="https://raw.githubusercontent.com/expure/multitoolroblox/refs/heads/main/AIModelPilot-by-Rzeinil-v2"},
  },
  MODFILE="AIPilotModel.json", HOLD=7500, LANDDIST=50, TD=5,
  HDZ=15, LDZ=12, KREF=3, ROLL=1, YAW=1, ATC=2,
@@ -39,7 +38,6 @@ local S={
  aAlt=nil, aAltT=0, aVS=0, aLandT=0, aM=nil, aMT=0, aMPS=0.3,
  atc=false, atcTok=0,
  lobbyMode=false, lobbyInterrupt=false, lobbySeq=false,
- feedTarget=nil,
  active={}, tAtt=nil, tCur=nil, flyConn=nil,
 }
 
@@ -88,18 +86,42 @@ local function getPos(i)
 	if i:IsA("BasePart") then return i.Position end
 	local r=getRootPart(i); return r and r.Position
 end
-
 local function teleport(part,off)
 	local root=getRoot(player.Character); local p=getPos(part)
 	if not root or not p then return false end
-	root.CFrame=CFrame.new(p+(off or Vector3.new(0,3,0)))
-	task.wait(0.03); return true
+	off=off or Vector3.new(0,3,0); local t=p+off
+	local start=root.CFrame; local goal=CFrame.new(t)
+	local dur=0.35; local st=tick()
+	while tick()-st<dur do
+		local a=(tick()-st)/dur
+		root.CFrame=start:Lerp(goal,a)
+		task.wait()
+	end
+	root.CFrame=goal; task.wait(0.03); return true
 end
 local function fastTeleport(part,off)
 	local root=getRoot(player.Character); local p=getPos(part)
 	if not root or not p then return false end
-	root.CFrame=CFrame.new(p+(off or Vector3.new(0,3,0)))
-	task.wait(0.03); return true
+	off=off or Vector3.new(0,3,0); local t=p+off
+	local start=root.CFrame; local goal=CFrame.new(t)
+	local dur=0.08; local st=tick()
+	while tick()-st<dur do
+		local a=(tick()-st)/dur
+		root.CFrame=start:Lerp(goal,a)
+		task.wait()
+	end
+	root.CFrame=goal; task.wait(0.03); return true
+end
+local function tweenTo(part,off,duration)
+	local root=getRoot(player.Character); local p=getPos(part)
+	if not root or not p then return false end
+	off=off or Vector3.new(0,3,0)
+	local goal=CFrame.new(p+off)
+	local ti=TweenInfo.new(duration or CFG.FEED_TWEEN, Enum.EasingStyle.Linear)
+	local tw=TweenService:Create(root, ti, {CFrame=goal})
+	tw:Play()
+	tw.Completed:Wait()
+	return true
 end
 local function teleportToTablet()
 	local tab=playerGui:FindFirstChild("Tablet")
@@ -108,19 +130,6 @@ local function teleportToTablet()
 	if target then return teleport(target, Vector3.new(0,3,0)) end
 	return false
 end
-
-task.spawn(function()
-	while true do
-		if S.feed and S.feedTarget then
-			local root=getRoot(player.Character)
-			local p=getPos(S.feedTarget)
-			if root and p then
-				root.CFrame=root.CFrame:Lerp(CFrame.new(p+Vector3.new(0,0.5,1)), CFG.FEED_LERP)
-			end
-		end
-		task.wait()
-	end
-end)
 
 do
 	local o=playerGui:FindFirstChild("PassengerESPGui"); if o then o:Destroy() end
@@ -228,7 +237,7 @@ local function setFarm(st)
 	U.gui.Enabled = not st
 	U.farmGui.Enabled = st
 	if not st then
-		S.lobbyMode=false; S.lobbyInterrupt=true; S.feedTarget=nil
+		S.lobbyMode=false; S.lobbyInterrupt=true
 		setFarmBoxNormal()
 		setStatus("Auto Farm: OFF")
 	else
@@ -455,6 +464,19 @@ local function findCrate()
 	return best
 end
 local function cratePart(c) if c:IsA("BasePart") then return c end; return getRootPart(c) end
+local function collectCrates(tok)
+	local list=findAllCrates()
+	if #list==0 then return false end
+	for _,c in ipairs(list) do
+		if tok and (not S.feed or S.feedTok~=tok) then return true end
+		local cp=cratePart(c); if cp then
+			teleport(cp,Vector3.new(0,3,0)); task.wait(0.034)
+			local un=camLock(cp)
+			fireTT(CFG.A_PICK,c); task.wait(CFG.PICKW); un()
+		end
+	end
+	return true
+end
 
 local function prio(t)
 	if typeof(t)~="string" then return nil end
@@ -518,6 +540,31 @@ local function equipSandwich()
 end
 local function hasTool() return countSandwiches()>0 end
 
+local function restock(tok)
+	teleportToTablet()
+	local before=foodAmt() or 0
+	if not fireSH("sandwich","miles") then task.wait(0.132) return false end
+	task.wait(CFG.PURW)
+	local crate=nil; local st=tick()
+	while tick()-st<CFG.DELW do
+		if not S.feed or S.feedTok~=tok then return false end
+		crate=findCrate(); if crate then break end
+		task.wait(0.02)
+	end
+	if not crate then task.wait(0.066) return false end
+	local cp=cratePart(crate); if not cp then return false end
+	teleport(cp,Vector3.new(0,3,0)); task.wait(0.034)
+	local un=camLock(cp)
+	fireTT(CFG.A_PICK,crate); task.wait(CFG.PICKW); un()
+	for _=1,25 do
+		if not S.feed or S.feedTok~=tok then return false end
+		local now=foodAmt(); if now and now>before then return true end
+		if not crate.Parent then return true end
+		task.wait(0.02)
+	end
+	return false
+end
+
 local function takeFood(tok)
 	local amt=foodAmt()
 	local before=countSandwiches()
@@ -539,67 +586,39 @@ local function takeFood(tok)
 	return false
 end
 
--- Асинхронная закупка и сбор ящиков на лету
-local isBuying = false
-task.spawn(function()
-	while true do
-		if S.feed then
-			local root = getRoot(player.Character)
-			if root then
-				local p = workspace:FindFirstChild(CFG.PLANE)
-				if p then
-					-- Закупка при пролёте мимо планшета
-					local tablet = playerGui:FindFirstChild("Tablet")
-					if tablet then
-						local target = tablet.Adornee or tablet:FindFirstChildWhichIsA("BasePart") or tablet:FindFirstChildWhichIsA("Model")
-						if target then
-							local tp = getPos(target)
-							if tp and (root.Position - tp).Magnitude < 25 then
-								local amt = foodAmt()
-								if amt and amt <= 10 and not isBuying then
-									isBuying = true
-									task.spawn(function()
-										for i=1, CFG.BUY_CRATES do
-											fireSH("sandwich", "miles")
-											task.wait(CFG.PURW)
-										end
-										isBuying = false
-									end)
-								end
-							end
-						end
-					end
-					
-					-- Сбор ящиков при пролёте мимо них
-					local crates = findAllCrates()
-					for _,c in ipairs(crates) do
-						local cp = cratePart(c)
-						if cp and (root.Position - cp.Position).Magnitude < 15 then
-							fireTT(CFG.A_PICK, c)
-						end
-					end
-				end
-			end
-		end
-		task.wait(0.2)
-	end
-end)
-
 local function ensureFood(tok)
-	S.feedTarget=nil
-	if countSandwiches()>0 then return equipSandwich() end
+	local sand=countSandwiches()
 	local amt=foodAmt()
-	if amt and amt>0 then takeFood(tok) end
+	print(string.format("[FOOD] sandwiches(in bag)=%d | crate Amount=%s", sand, tostring(amt)))
+	if sand>0 then return equipSandwich() end
+	if not amt or amt<=0 then
+		collectCrates(tok)
+		amt=foodAmt()
+		print("[FOOD] after collectCrates -> crate Amount="..tostring(amt))
+	end
+	if not amt or amt<=0 then
+		restock(tok)
+		amt=foodAmt()
+		print("[FOOD] after restock -> crate Amount="..tostring(amt))
+	end
+	if amt and amt>0 then
+		takeFood(tok)
+	else
+		print("[FOOD] crate empty -> NOT taking")
+	end
 	return equipSandwich()
 end
 
+-- подлёт 0.2 сек, БЕЗ кулдауна после
 local function feedOne(pm,tok)
 	if not equipSandwich() then return false end
 	local pr=pm:FindFirstChild("HumanoidRootPart") or getRootPart(pm); if not pr then return false end
-	S.feedTarget=pr
+	tweenTo(pr, Vector3.new(0,0.5,1), CFG.FEED_TWEEN)
 	for _=1,CFG.ICE_N do fireTT(CFG.A_ICE,pm); task.wait(CFG.ICE_D) end
+	local un=camLock(pr)
 	fireTT(CFG.A_FEED,pm); fireTT(CFG.A_FEED,pr)
 	fireTT(CFG.A_TALK,pm); fireTT(CFG.A_TALK,pr)
+	un()
 	return true
 end
 local function feedLoop(tok)
@@ -870,7 +889,7 @@ local function farmFeedFC(onlyOne)
 			feedOne(pm,tok)
 		end
 	end
-	S.feed=false; S.feedTarget=nil; updFeed()
+	S.feed=false; updFeed()
 	sitInSeat(getPilotSeat())
 end
 
@@ -880,7 +899,7 @@ local function farmFeedPC()
 	local tok=S.feedTok+1; S.feedTok=tok; S.feed=true
 	local pr,pm=worstPriority()
 	if pm and pr>=4 then ensureFood(tok); feedOne(pm,tok) end
-	S.feed=false; S.feedTarget=nil; updFeed()
+	S.feed=false; updFeed()
 	sitInSeat(getPilotSeat())
 end
 
@@ -893,7 +912,7 @@ local function farmFeedAF()
 		if not ensureFood(tok) then break end
 		if not feedOne(pm,tok) then continue end
 	end
-	S.feed=false; S.feedTarget=nil; updFeed()
+	S.feed=false; updFeed()
 end
 
 task.spawn(function()
@@ -1030,7 +1049,7 @@ end)
 U.fly.MouseButton1Click:Connect(function() setFly(not S.fly) end)
 U.esp.MouseButton1Click:Connect(function() setESP(not S.esp) end)
 U.feed.MouseButton1Click:Connect(function()
-	if S.feed then S.feed=false; S.feedTok+=1; S.feedTarget=nil; updFeed()
+	if S.feed then S.feed=false; S.feedTok+=1; updFeed()
 	else S.feed=true; S.feedTok+=1; updFeed(); local t=S.feedTok; task.spawn(function() feedLoop(t) end) end
 end)
 U.ai.MouseButton1Click:Connect(function()
@@ -1074,7 +1093,7 @@ U.close.MouseButton1Click:Connect(function()
 	setESP(false); setFly(false)
 	if S.feed then S.feed=false; S.feedTok+=1 end
 	if S.ai then setAI(false) end
-	S.farm=false; saveFarm(false); S.atc=false; S.lobbyMode=false; S.lobbySeq=false; S.feedTarget=nil
+	S.farm=false; saveFarm(false); S.atc=false; S.lobbyMode=false; S.lobbySeq=false
 	U.farmGui.Enabled=false; U.gui.Enabled=false
 end)
 
