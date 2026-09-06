@@ -15,7 +15,7 @@ local CFG={
  SRC=SCRIPT_URL, PLANE="Plane", PASS="Passengers", FOOD="FoodCrate",
  A_TAKE="Take Food", A_FEED="Feed", A_TALK="Talk to Passenger", A_PICK="Pickup Delivery", A_ICE="Break Ice", A_SEAT="Seat",
  ICE_N=6, ICE_D=0.01, PASSOUT=10, ROLLMAX=30, LOBBY_INT=7, GROUND=108, TOUCH=5,
- FOOD_BUY_THRESHOLD=12, BUY_CRATES=4,
+ FOOD_BUY_THRESHOLD=12, BUY_CRATES=4, FEED_DIST=0.5, FEED_DUR=0.12,
  AMT={"Plane","FoodCrate","FoodCrate","Part","SurfaceGui","Frame","Amount"},
  SCAN=0.08, WMIN=0, WMAX=200, WDEF=16, FLYM=10, FLYL=0.6, FLYB=2,
  PURW=0.2, DELW=0.54, PICKW=0.066, TSD=0.017, TTIME=1.5,
@@ -86,12 +86,14 @@ local function getPos(i)
 	if i:IsA("BasePart") then return i.Position end
 	local r=getRootPart(i); return r and r.Position
 end
-local function teleport(part,off)
+-- teleport с настраиваемой длительностью
+local function teleport(part,off,dur)
 	local root=getRoot(player.Character); local p=getPos(part)
 	if not root or not p then return false end
 	off=off or Vector3.new(0,3,0); local t=p+off
+	dur=dur or 0.35
 	local start=root.CFrame; local goal=CFrame.new(t)
-	local dur=0.35; local st=tick()
+	local st=tick()
 	while tick()-st<dur do
 		local a=(tick()-st)/dur
 		root.CFrame=start:Lerp(goal,a)
@@ -529,7 +531,6 @@ local function equipSandwich()
 end
 local function hasTool() return countSandwiches()>0 end
 
--- покупает сразу BUY_CRATES ящиков, когда в FoodCrate мало
 local function restock(tok)
 	teleportToTablet()
 	local before=foodAmt() or 0
@@ -569,7 +570,6 @@ local function takeFood(tok)
 	return false
 end
 
--- докупает, когда в ящике <= FOOD_BUY_THRESHOLD
 local function ensureFood(tok)
 	local sand=countSandwiches()
 	local amt=foodAmt()
@@ -585,10 +585,11 @@ local function ensureFood(tok)
 	return equipSandwich()
 end
 
+-- БЛИЖЕ и БЫСТРЕЕ к пассажиру
 local function feedOne(pm,tok)
 	if not equipSandwich() then return false end
 	local pr=pm:FindFirstChild("HumanoidRootPart") or getRootPart(pm); if not pr then return false end
-	teleport(pr,Vector3.new(0,0.5,1))
+	teleport(pr, Vector3.new(0,0.3,CFG.FEED_DIST), CFG.FEED_DUR)
 	for _=1,CFG.ICE_N do fireTT(CFG.A_ICE,pm); task.wait(CFG.ICE_D) end
 	local un=camLock(pr)
 	fireTT(CFG.A_FEED,pm); fireTT(CFG.A_FEED,pr)
