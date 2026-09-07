@@ -6,7 +6,7 @@ local player=Players.LocalPlayer
 local playerGui=player:WaitForChild("PlayerGui")
 if  _G.sourcecheckexvs ~= "source" then 
     warn("https://rscripts.net/script/multi-tool-hub-X0cu")
-    error("The script source is not supported! Please use EXVS Hub from link upper!")
+    error("The script source is not supported! Please use EXVS Hub from link upper!", 0)
 end
 local STATE_FILE="AIPilotFarmState.txt"
 local MODE_FILE="AIPilotFarmMode.txt"
