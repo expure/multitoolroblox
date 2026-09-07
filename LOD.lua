@@ -14,8 +14,9 @@ local FARM_MODES={ fc="Feed&Control", af="Always Feed", pc="Prioritise Control" 
 local CFG={
  SRC=SCRIPT_URL, PLANE="Plane", PASS="Passengers", FOOD="FoodCrate",
  A_TAKE="Take Food", A_FEED="Feed", A_TALK="Talk to Passenger", A_PICK="Pickup Delivery", A_ICE="Break Ice", A_SEAT="Seat",
- ICE_N=6, ICE_D=0.01, PASSOUT=1, ROLLMAX=30, LOBBY_INT=7, GROUND=108, TOUCH=5,
- FOOD_BUY_THRESHOLD=12, BUY_CRATES=4, FEED_DIST=0.5, FEED_DUR=0.12, TT_BUDGET=15,
+ ICE_N=6, ICE_D=0.01, PASSOUT=10, ROLLMAX=30, LOBBY_INT=7, GROUND=108, TOUCH=5,
+ FOOD_BUY_THRESHOLD=12, BUY_CRATES=4, FEED_DIST=0.5, FEED_DUR=0.12, TT_BUDGET=15, FEED_TRIES=3,
+ FEED_CD=10, TALK_CD=5,
  AMT={"Plane","FoodCrate","FoodCrate","Part","SurfaceGui","Frame","Amount"},
  SCAN=0.08, WMIN=0, WMAX=200, WDEF=16, FLYM=10, FLYL=0.6, FLYB=2,
  PURW=0.2, DELW=0.54, PICKW=0.066, TSD=0.017, TTIME=1.5,
@@ -40,6 +41,14 @@ local S={
  lobbyMode=false, lobbyInterrupt=false, lobbySeq=false,
  active={}, tAtt=nil, tCur=nil, flyConn=nil,
 }
+
+-- кулдауны на пассажиров (per-passenger)
+local feedCD={}   -- время, до которого нельзя кормить
+local talkCD={}   -- время, до которого нельзя разговаривать
+local function canFeed(m) return (feedCD[m] or 0) <= tick() end
+local function canTalk(m) return (talkCD[m] or 0) <= tick() end
+local function markFed(m) feedCD[m]=tick()+CFG.FEED_CD end
+local function markTalked(m) talkCD[m]=tick()+CFG.TALK_CD end
 
 local function saveFarm(st) pcall(function() if type(writefile)=="function" then writefile(STATE_FILE, st and "1" or "0") end end) end
 local function loadFarm()
@@ -416,7 +425,6 @@ local ttR, shR
 local function getTT() if ttR and ttR.Parent then return ttR end; local r=RS:FindFirstChild("Remotes"); ttR=r and r:FindFirstChild("TooltipAction"); return ttR end
 local function getSH() if shR and shR.Parent then return shR end; local r=RS:FindFirstChild("Remotes"); shR=r and r:FindFirstChild("TabletShopPurchase"); return shR end
 
--- ОЧЕРЕДЬ remote-ов (token bucket): не теряем события, но не флудим сервер
 local TT_QUEUE={}
 local ttTokens=CFG.TT_BUDGET
 local ttLast=tick()
@@ -518,6 +526,7 @@ local function worstPriority()
 	local list={}; collectModels(ps,list)
 	local bp=0; local bm=nil
 	for _,m in ipairs(list) do
+		if not canFeed(m) then continue end           -- кулдаун кормления
 		local pr,rt=pState(m)
 		if pr and pr>0 and rt and pr>bp then bp=pr; bm=m end
 	end
@@ -611,15 +620,24 @@ local function ensureFood(tok)
 	return equipSandwich()
 end
 
+-- СНАЧАЛА кормление (кулдаун 10с), ПОТОМ разговор (кулдаун 5с)
 local function feedOne(pm,tok)
+	if not canFeed(pm) then return false end
 	if not equipSandwich() then return false end
 	local pr=pm:FindFirstChild("HumanoidRootPart") or getRootPart(pm); if not pr then return false end
 	teleport(pr, Vector3.new(0,0.3,CFG.FEED_DIST), CFG.FEED_DUR)
 	for _=1,CFG.ICE_N do fireTT(CFG.A_ICE,pm); task.wait(CFG.ICE_D) end
 	local un=camLock(pr)
-	fireTT(CFG.A_FEED,pm); fireTT(CFG.A_FEED,pr)
-	fireTT(CFG.A_TALK,pm); fireTT(CFG.A_TALK,pr)
+	fireTT(CFG.A_FEED,pm); fireTT(CFG.A_FEED,pr)   -- 1) кормим
 	un()
+	markFed(pm)                                       -- кулдаун кормления 10с
+	task.wait(0.05)
+	if canTalk(pm) then
+		local un2=camLock(pr)
+		fireTT(CFG.A_TALK,pm); fireTT(CFG.A_TALK,pr) -- 2) разговариваем
+		un2()
+		markTalked(pm)                                -- кулдаун разговора 5с
+	end
 	return true
 end
 local function feedLoop(tok)
@@ -910,8 +928,17 @@ local function farmFeedAF()
 	local tok=S.feedTok+1; S.feedTok=tok; S.feed=true
 	for _,pm in ipairs(allPassengers()) do
 		if not S.farm then break end
+		if not canFeed(pm) then continue end            -- кулдаун кормления
+		local pr,_=pState(pm)
+		if not pr or pr<2 then continue end            -- только Anxious и хуже
 		if not ensureFood(tok) then break end
-		if not feedOne(pm,tok) then continue end
+		for attempt=1,CFG.FEED_TRIES do
+			if not S.farm then break end
+			if not canFeed(pm) then break end
+			feedOne(pm,tok)
+			local npr,_=pState(pm)
+			if not npr or npr<2 then break end
+		end
 	end
 	S.feed=false; updFeed()
 end
@@ -921,7 +948,7 @@ task.spawn(function()
 		if S.farm and not S.lobbyMode and not S.lobbySeq then
 			local mode=S.farmMode
 			if mode=="af" then
-				setStatus("Always Feed: feeding all passengers")
+				setStatus("Always Feed: feeding anxious+ passengers")
 				farmFeedAF()
 			elseif mode=="pc" then
 				if S.model and not S.ai then setAI(true) end
