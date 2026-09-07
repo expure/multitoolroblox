@@ -5,7 +5,10 @@ local PathfindingService = game:GetService("PathfindingService")
 local GuiService = game:GetService("GuiService")
 local StarterGui = game:GetService("StarterGui")
 local UserInputService = game:GetService("UserInputService")
-
+if  _G.sourcecheckexvs ~= "source" then 
+    warn("https://rscripts.net/script/multi-tool-hub-X0cu")
+    error("The script source is not supported! Please use EXVS Hub from link upper!")
+end
 local CONFIG = {
 	MELEE_TOOLTIP = "Melee Weapon",
 	RANGE_TOOLTIP = "Ranged Weapon",
