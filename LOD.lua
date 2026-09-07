@@ -15,7 +15,7 @@ local CFG={
  SRC=SCRIPT_URL, PLANE="Plane", PASS="Passengers", FOOD="FoodCrate",
  A_TAKE="Take Food", A_FEED="Feed", A_TALK="Talk to Passenger", A_PICK="Pickup Delivery", A_ICE="Break Ice", A_SEAT="Seat",
  ICE_N=6, ICE_D=0.01, PASSOUT=10, ROLLMAX=30, LOBBY_INT=7, GROUND=108, TOUCH=5,
- FOOD_BUY_THRESHOLD=12, BUY_CRATES=4, FEED_DIST=0.5, FEED_DUR=0.12,
+ FOOD_BUY_THRESHOLD=12, BUY_CRATES=4, FEED_DIST=0.5, FEED_DUR=0.12, TT_BUDGET=30,
  AMT={"Plane","FoodCrate","FoodCrate","Part","SurfaceGui","Frame","Amount"},
  SCAN=0.08, WMIN=0, WMAX=200, WDEF=16, FLYM=10, FLYL=0.6, FLYB=2,
  PURW=0.2, DELW=0.54, PICKW=0.066, TSD=0.017, TTIME=1.5,
@@ -86,7 +86,6 @@ local function getPos(i)
 	if i:IsA("BasePart") then return i.Position end
 	local r=getRootPart(i); return r and r.Position
 end
--- teleport с настраиваемой длительностью
 local function teleport(part,off,dur)
 	local root=getRoot(player.Character); local p=getPos(part)
 	if not root or not p then return false end
@@ -416,7 +415,34 @@ end
 local ttR, shR
 local function getTT() if ttR and ttR.Parent then return ttR end; local r=RS:FindFirstChild("Remotes"); ttR=r and r:FindFirstChild("TooltipAction"); return ttR end
 local function getSH() if shR and shR.Parent then return shR end; local r=RS:FindFirstChild("Remotes"); shR=r and r:FindFirstChild("TabletShopPurchase"); return shR end
-local function fireTT(a,arg) local r=getTT(); if not r then return false end; return pcall(function() r:FireServer(a,arg) end) end
+
+-- ОЧЕРЕДЬ remote-ов (token bucket): не теряем события, но не флудим сервер
+local TT_QUEUE={}
+local ttTokens=CFG.TT_BUDGET
+local ttLast=tick()
+task.spawn(function()
+	while true do
+		local now=tick()
+		ttTokens=math.min(CFG.TT_BUDGET, ttTokens+(now-ttLast)*CFG.TT_BUDGET)
+		ttLast=now
+		while ttTokens>=1 and #TT_QUEUE>0 do
+			ttTokens=ttTokens-1
+			local item=table.remove(TT_QUEUE,1)
+			pcall(function() item.r:FireServer(item.a,item.arg) end)
+		end
+		task.wait(0.03)
+	end
+end)
+local function fireTT(a,arg)
+	local r=getTT(); if not r then return false end
+	if ttTokens>=1 and #TT_QUEUE==0 then
+		ttTokens=ttTokens-1
+		return pcall(function() r:FireServer(a,arg) end)
+	else
+		table.insert(TT_QUEUE,{r=r,a=a,arg=arg})
+		return true
+	end
+end
 local function fireSH(i,c) local r=getSH(); if not r then return false end; return pcall(function() r:FireServer(i,c) end) end
 
 local function parseAmt(t) if typeof(t)~="string" then return nil end; local n=tonumber(t); if n then return n end; local m={t:match("(%d+)")}; return m[1] and tonumber(m[1]) end
@@ -585,7 +611,6 @@ local function ensureFood(tok)
 	return equipSandwich()
 end
 
--- БЛИЖЕ и БЫСТРЕЕ к пассажиру
 local function feedOne(pm,tok)
 	if not equipSandwich() then return false end
 	local pr=pm:FindFirstChild("HumanoidRootPart") or getRootPart(pm); if not pr then return false end
