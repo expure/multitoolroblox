@@ -5,7 +5,10 @@ local UserInputService = game:GetService("UserInputService")
 local TweenService = game:GetService("TweenService")
 local Workspace = game:GetService("Workspace")
 local player = Players.LocalPlayer
-
+if  _G.sourcecheckexvs ~= "source" then 
+    warn("https://rscripts.net/script/multi-tool-hub-X0cu")
+    error("The script source is not supported! Please use EXVS Hub from link upper!")
+end
 local C = {
     ClickDelay = 0.05, MaxClicksPerFrame = 10, SellEvent = "SellRocks", BuyToolEvent = "BuyTool",
     SellInterval = 5, PawnShopPath = "PawnShop.Insanity", TeleportDelayShop = 1.5, MaxRetries = 3,
