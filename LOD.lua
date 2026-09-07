@@ -14,8 +14,8 @@ local FARM_MODES={ fc="Feed&Control", af="Always Feed", pc="Prioritise Control" 
 local CFG={
  SRC=SCRIPT_URL, PLANE="Plane", PASS="Passengers", FOOD="FoodCrate",
  A_TAKE="Take Food", A_FEED="Feed", A_TALK="Talk to Passenger", A_PICK="Pickup Delivery", A_ICE="Break Ice", A_SEAT="Seat",
- ICE_N=6, ICE_D=0.01, PASSOUT=10, ROLLMAX=30, LOBBY_INT=7, GROUND=108, TOUCH=5,
- FOOD_BUY_THRESHOLD=12, BUY_CRATES=4, FEED_DIST=0.5, FEED_DUR=0.12, TT_BUDGET=30,
+ ICE_N=6, ICE_D=0.01, PASSOUT=1, ROLLMAX=30, LOBBY_INT=7, GROUND=108, TOUCH=5,
+ FOOD_BUY_THRESHOLD=12, BUY_CRATES=4, FEED_DIST=0.5, FEED_DUR=0.12, TT_BUDGET=15,
  AMT={"Plane","FoodCrate","FoodCrate","Part","SurfaceGui","Frame","Amount"},
  SCAN=0.08, WMIN=0, WMAX=200, WDEF=16, FLYM=10, FLYL=0.6, FLYB=2,
  PURW=0.2, DELW=0.54, PICKW=0.066, TSD=0.017, TTIME=1.5,
