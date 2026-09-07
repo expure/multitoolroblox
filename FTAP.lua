@@ -10,7 +10,10 @@ local character = player.Character or player.CharacterAdded:Wait()
 local humanoid = character:WaitForChild("Humanoid")
 local hrp = character:WaitForChild("HumanoidRootPart")
 local Mouse = player:GetMouse()
-
+if  _G.sourcecheckexvs ~= "source" then 
+    warn("https://rscripts.net/script/multi-tool-hub-X0cu")
+    error("The script source is not supported! Please use EXVS Hub from link upper!")
+end
 local BASE_WALK_SPEED = humanoid.WalkSpeed
 local BASE_JUMP = humanoid.JumpPower
 
