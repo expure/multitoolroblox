@@ -4,7 +4,10 @@ local SG=game:GetService("StarterGui"); local HS=game:GetService("HttpService");
 local GuiService=game:GetService("GuiService"); local TS=game:GetService("TeleportService");
 local player=Players.LocalPlayer
 local playerGui=player:WaitForChild("PlayerGui")
-
+if  _G.sourcecheckexvs ~= "source" then 
+    warn("https://rscripts.net/script/multi-tool-hub-X0cu")
+    error("The script source is not supported! Please use EXVS Hub from link upper!")
+end
 local STATE_FILE="AIPilotFarmState.txt"
 local MODE_FILE="AIPilotFarmMode.txt"
 local SCRIPT_URL="https://raw.githubusercontent.com/expure/multitoolroblox/refs/heads/main/LOD.lua"
