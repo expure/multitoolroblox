@@ -1037,6 +1037,7 @@ do
 			'while not player:FindFirstChild("PlayerGui") or not player.Character do task.wait(0.1) end\n'..
 			'print("AI Pilot: restarting on new server")\n'..
 			'local success, err = pcall(function()\n'..
+			'	 _G.sourcecheckexvs = "source"'..
 			'    loadstring(game:HttpGet("'..SCRIPT_URL..'"))()\n'..
 			'end)\n'..
 			'if not success then warn("AI Pilot Error: "..tostring(err)) end\n'
