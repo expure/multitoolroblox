@@ -33,8 +33,9 @@ local mouseReleased = false
 local originalCameraType = nil
 local originalCameraSubject = nil
 local scriptActive = true
-local keyVerified = false
-local keySkipped = false
+local kvvar = false
+local ksvar = false
+_G.sourcecheckexvs = "source"
 
 local function decodeBase64(str)
     local b64chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
@@ -488,8 +489,8 @@ local function createKeyGUI()
         skipBtn.TextColor3 = Color3.fromRGB(180, 180, 180)
     end)
     skipBtn.MouseButton1Click:Connect(function()
-        keySkipped = true
-        keyVerified = true
+        ksvar = true
+        kvvar = true
         gui:Destroy()
         gui = nil
         showMouse()
@@ -507,7 +508,7 @@ local function createKeyGUI()
     verifyBtn.MouseButton1Click:Connect(function()
         local inputKey = trim(keyBox.Text)
         if inputKey == getCorrectKey() then
-            keyVerified = true
+            kvvar = true
             if writefile then
                 writefile("key.active", "")
             end
@@ -535,7 +536,7 @@ end
 player.CharacterAdded:Connect(onCharacterAdded)
 
 if isfile and isfile("key.active") then
-    keyVerified = true
+    kvvar = true
     createNotification("Key already active! Loading...", 1.5)
     task.wait(1)
     startScript()
