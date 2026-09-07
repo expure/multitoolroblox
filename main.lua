@@ -9,7 +9,10 @@ local TeleportService = game:GetService("TeleportService")
 local CollectionService = game:GetService("CollectionService")
 local SoundService = game:GetService("SoundService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-
+if  _G.sourcecheckexvs ~= "source" then 
+    warn("https://rscripts.net/script/multi-tool-hub-X0cu")
+    error("The script source is not supported! Please use EXVS Hub from link upper!")
+end
 local isMobile = not UIS.KeyboardEnabled and UIS.TouchEnabled
 if isMobile then
     local player = Players.LocalPlayer
