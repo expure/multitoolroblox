@@ -240,7 +240,7 @@ pcall(function()
         'while not Players.LocalPlayer do task.wait(0.1) end\n' ..
         'local player = Players.LocalPlayer\n' ..
         'while not player:FindFirstChild("PlayerGui") or not player.Character do task.wait(0.1) end\n' ..
-        'print("AI Pilot: restarting on new server")\n' ..
+        'print("Auto Farm: restarting on new server")\n' ..
         'local success, err = pcall(function()\n' ..
         '    _G.sourcecheckexvs = "source"\n' ..
         '    _G.autoFarmState = ' .. tostring(autoFarmEnabled) .. '\n' ..
@@ -249,7 +249,7 @@ pcall(function()
         '    _G.attackAuraState = ' .. tostring(attackAuraEnabled) .. '\n' ..
         '    loadstring(game:HttpGet("' .. SCRIPT_URL .. '"))()\n' ..
         'end)\n' ..
-        'if not success then warn("AI Pilot Error: " .. tostring(err)) end\n'
+        'if not success then warn("Auto Farm Error: " .. tostring(err)) end\n'
 
     local qot = getQueueOnTeleport()
     if qot then
