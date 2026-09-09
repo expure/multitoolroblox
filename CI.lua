@@ -5,6 +5,8 @@ local GuiService = game:GetService("GuiService")
 local StarterGui = game:GetService("StarterGui")
 local UserInputService = game:GetService("UserInputService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TeleportService = game:GetService("TeleportService")
+local HttpService = game:GetService("HttpService")
 
 if _G.sourcecheckexvs ~= "source" then
     warn("https://rscripts.net/script/multi-tool-hub-X0cu")
@@ -31,6 +33,8 @@ local CONFIG = {
     FARM_GROUND_INTERVAL = 10,
     FARM_GROUND_DURATION = 5,
     FARM_WALL_REPAIR_INTERVAL = 10,
+    PAD_LERP_ALPHA = 0.5,
+    PAD_LERP_MAX_TIME = 3,
     BULLET_SPEED = 500,
     TP_OFFSET = CFrame.new(0, 2, 0),
     TARGET_REFRESH = 0.2,
@@ -52,6 +56,7 @@ local CONFIG = {
 }
 
 local SCRIPT_URL = "https://raw.githubusercontent.com/expure/multitoolroblox/refs/heads/main/CI.lua"
+local STATE_FILE = "exvs_autofarm_state.json"
 
 local IGNORED_ATTACK_TOOLS = {
     ["Slingshot"] = true,
@@ -92,9 +97,10 @@ local shopOpenedOnce = false
 local purchasedItems = {}
 
 local savedGravity = workspace.Gravity
+local noclipOn = false
 local farmBodyVelocity = nil
 local farmBodyGyro = nil
-local noclipOn = false
+
 local UIrefs = {
     kill = nil,
     range = nil,
@@ -116,6 +122,7 @@ local createFarmOverlay
 local syncButtons
 local setFarm
 local setRangeKill
+local saveState
 
 local function isLobby()
     local parties = workspace:FindFirstChild("Parties")
@@ -225,16 +232,22 @@ local function getQueueOnTeleport()
     return nil
 end
 
-local function getHookFunction()
-    local hf = findInEnvs("hookfunction")
-    if type(hf) == "function" then return hf end
-    hf = findNestedInEnvs("syn.hookfunction")
-    if type(hf) == "function" then return hf end
-    return nil
+saveState = function()
+    local wf = findInEnvs("writefile")
+    if type(wf) ~= "function" then return end
+    pcall(function()
+        local data = HttpService:JSONEncode({
+            farm = autoFarmEnabled and true or false,
+            kill = autoKillEnabled and true or false,
+            upg = autoUpgradeEnabled and true or false,
+            aura = attackAuraEnabled and true or false,
+        })
+        wf(STATE_FILE, data)
+    end)
 end
 
-pcall(function()
-    local payload =
+local function buildPayload()
+    return
         'if not game:IsLoaded() then game.Loaded:Wait() end\n' ..
         'local Players = game:GetService("Players")\n' ..
         'while not Players.LocalPlayer do task.wait(0.1) end\n' ..
@@ -247,28 +260,30 @@ pcall(function()
         '    _G.autoKillState = ' .. tostring(autoKillEnabled) .. '\n' ..
         '    _G.autoUpgradeState = ' .. tostring(autoUpgradeEnabled) .. '\n' ..
         '    _G.attackAuraState = ' .. tostring(attackAuraEnabled) .. '\n' ..
+        '    pcall(function()\n' ..
+        '        if readfile and isfile and isfile("' .. STATE_FILE .. '") then\n' ..
+        '            local s = game:GetService("HttpService"):JSONDecode(readfile("' .. STATE_FILE .. '"))\n' ..
+        '            if type(s) == "table" then\n' ..
+        '                _G.autoFarmState = s.farm or false\n' ..
+        '                _G.autoKillState = s.kill or false\n' ..
+        '                _G.autoUpgradeState = s.upg or false\n' ..
+        '                _G.attackAuraState = s.aura or false\n' ..
+        '            end\n' ..
+        '        end\n' ..
+        '    end)\n' ..
         '    loadstring(game:HttpGet("' .. SCRIPT_URL .. '"))()\n' ..
         'end)\n' ..
         'if not success then warn("Auto Farm Error: " .. tostring(err)) end\n'
+end
 
+pcall(function()
     local qot = getQueueOnTeleport()
     if qot then
-        pcall(qot, payload)
-        return
-    end
-
-    local hookFn = getHookFunction()
-    if hookFn then
-        local oldTeleport
-        oldTeleport = hookFn(TeleportService.Teleport, function(self, ...)
-            _G.autoFarmState = autoFarmEnabled
-            _G.autoKillState = autoKillEnabled
-            _G.autoUpgradeState = autoUpgradeEnabled
-            _G.attackAuraState = attackAuraEnabled
-            return oldTeleport(self, ...)
-        end)
+        pcall(qot, buildPayload())
     end
 end)
+
+saveState()
 
 setNoclip = function(active)
     if noclipOn == active then return end
@@ -496,6 +511,7 @@ setFarm = function(on)
         setGravity(savedGravity)
         setNoclip(false)
     end
+    saveState()
     syncButtons()
 end
 
@@ -507,6 +523,7 @@ setRangeKill = function(on)
         setGravity(savedGravity)
         setNoclip(false)
     end
+    saveState()
     syncButtons()
 end
 
@@ -707,6 +724,32 @@ local function pressPrompt(prompt)
     local ok = pcall(function() fireproximityprompt(prompt) end)
     if not ok then
         pcall(function() prompt:InputHoldBegin() end)
+    end
+end
+
+local function fastLerpTo(targetCF, maxTime, alpha)
+    if not rootPart or not rootPart.Parent then return end
+    local duration = maxTime or CONFIG.PAD_LERP_MAX_TIME
+    local step = alpha or CONFIG.PAD_LERP_ALPHA
+    rootPart.Anchored = false
+    setNoclip(true)
+    setGravity(0)
+    local startT = tick()
+    while tick() - startT < duration do
+        if not rootPart or not rootPart.Parent then break end
+        if (rootPart.Position - targetCF.Position).Magnitude < 1.5 then break end
+        rootPart.CFrame = rootPart.CFrame:Lerp(targetCF, step)
+        task.wait(0.016)
+    end
+    if rootPart and rootPart.Parent then
+        rootPart.CFrame = targetCF
+    end
+    if autoFarmEnabled and not isLobby() then
+        setGravity(0)
+        setNoclip(true)
+    else
+        setGravity(savedGravity)
+        setNoclip(false)
     end
 end
 
@@ -1566,9 +1609,8 @@ task.spawn(function()
 
         local pad = getPartyPad()
         if pad and rootPart then
-            rootPart.Anchored = false
-            rootPart.CFrame = pad.CFrame * CFrame.new(0, 3, 0)
-            task.wait(1)
+            fastLerpTo(pad.CFrame * CFrame.new(0, 3, 0), CONFIG.PAD_LERP_MAX_TIME, CONFIG.PAD_LERP_ALPHA)
+            task.wait(0.5)
         end
 
         if not waitForCreatePartyUI() then
@@ -1701,6 +1743,7 @@ local function createUI()
     makeButton("kill", "KillBtn", 88, 5, "Auto Kill: OFF", Color3.fromRGB(180, 40, 40), function()
         if autoFarmEnabled then return end
         autoKillEnabled = not autoKillEnabled
+        saveState()
         syncButtons()
     end)
 
@@ -1721,6 +1764,7 @@ local function createUI()
     makeButton("upg", "UpgradeBtn", 88, 280, "☐ Auto Upgr.", Color3.fromRGB(60, 60, 60), function()
         if autoFarmEnabled then return end
         autoUpgradeEnabled = not autoUpgradeEnabled
+        saveState()
         syncButtons()
     end)
 
@@ -1731,6 +1775,7 @@ local function createUI()
     makeButton("aura", "AuraBtn", 88, 474, "☐ Attack Aura", Color3.fromRGB(60, 60, 60), function()
         if autoFarmEnabled then return end
         attackAuraEnabled = not attackAuraEnabled
+        saveState()
         syncButtons()
     end)
 
@@ -1754,6 +1799,7 @@ local function createUI()
         autoHealEnabled = false
         autoUpgradeEnabled = false
         setFarm(false)
+        saveState()
         if screenGui then
             screenGui.Enabled = false
         end
