@@ -11,7 +11,7 @@ end
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 
-local SCRIPT_URL = ""
+local SCRIPT_URL = "https://raw.githubusercontent.com/expure/multitoolroblox/refs/heads/main/RP.lua"
 
 local skippedPromptNames = {}
 
