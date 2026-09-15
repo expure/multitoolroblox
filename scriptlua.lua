@@ -30,6 +30,10 @@ local supportedGames = {
         url = "https://raw.githubusercontent.com/expure/multitoolroblox/refs/heads/main/RP.lua",
         name = "Rusty Plane"
     },
+    [8736668625] = {
+        url = "https://raw.githubusercontent.com/expure/multitoolroblox/refs/heads/main/BBW.lua",
+        name = "Bumper Boat Wars"
+    },
 }
 
 local gui = nil
