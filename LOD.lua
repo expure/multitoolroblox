@@ -45,9 +45,8 @@ local S={
  active={}, tAtt=nil, tCur=nil, flyConn=nil,
 }
 
--- кулдауны на пассажиров (per-passenger)
-local feedCD={}   -- время, до которого нельзя кормить
-local talkCD={}   -- время, до которого нельзя разговаривать
+local feedCD={}  
+local talkCD={} 
 local function canFeed(m) return (feedCD[m] or 0) <= tick() end
 local function canTalk(m) return (talkCD[m] or 0) <= tick() end
 local function markFed(m) feedCD[m]=tick()+CFG.FEED_CD end
@@ -529,7 +528,7 @@ local function worstPriority()
 	local list={}; collectModels(ps,list)
 	local bp=0; local bm=nil
 	for _,m in ipairs(list) do
-		if not canFeed(m) then continue end           -- кулдаун кормления
+		if not canFeed(m) then continue end      
 		local pr,rt=pState(m)
 		if pr and pr>0 and rt and pr>bp then bp=pr; bm=m end
 	end
@@ -623,7 +622,7 @@ local function ensureFood(tok)
 	return equipSandwich()
 end
 
--- СНАЧАЛА кормление (кулдаун 10с), ПОТОМ разговор (кулдаун 5с)
+
 local function feedOne(pm,tok)
 	if not canFeed(pm) then return false end
 	if not equipSandwich() then return false end
@@ -631,15 +630,15 @@ local function feedOne(pm,tok)
 	teleport(pr, Vector3.new(0,0.3,CFG.FEED_DIST), CFG.FEED_DUR)
 	for _=1,CFG.ICE_N do fireTT(CFG.A_ICE,pm); task.wait(CFG.ICE_D) end
 	local un=camLock(pr)
-	fireTT(CFG.A_FEED,pm); fireTT(CFG.A_FEED,pr)   -- 1) кормим
+	fireTT(CFG.A_FEED,pm); fireTT(CFG.A_FEED,pr)  
 	un()
-	markFed(pm)                                       -- кулдаун кормления 10с
+	markFed(pm)                                    
 	task.wait(0.05)
 	if canTalk(pm) then
 		local un2=camLock(pr)
-		fireTT(CFG.A_TALK,pm); fireTT(CFG.A_TALK,pr) -- 2) разговариваем
+		fireTT(CFG.A_TALK,pm); fireTT(CFG.A_TALK,pr)
 		un2()
-		markTalked(pm)                                -- кулдаун разговора 5с
+		markTalked(pm)                             
 	end
 	return true
 end
@@ -931,9 +930,9 @@ local function farmFeedAF()
 	local tok=S.feedTok+1; S.feedTok=tok; S.feed=true
 	for _,pm in ipairs(allPassengers()) do
 		if not S.farm then break end
-		if not canFeed(pm) then continue end            -- кулдаун кормления
+		if not canFeed(pm) then continue end          
 		local pr,_=pState(pm)
-		if not pr or pr<2 then continue end            -- только Anxious и хуже
+		if not pr or pr<2 then continue end          
 		if not ensureFood(tok) then break end
 		for attempt=1,CFG.FEED_TRIES do
 			if not S.farm then break end
