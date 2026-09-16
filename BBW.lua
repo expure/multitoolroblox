@@ -9,7 +9,10 @@ local function sp(t)
     if type(t)=="table"then return pairs(t)end;
     return function()return nil end;
 end;
-
+if  _G.sourcecheckexvs ~= "source" then 
+    warn("https://rscripts.net/script/multi-tool-hub-X0cu")
+    error("The script source is not supported! Please use EXVS Hub from link upper!", 0)
+end
 local CANNON_VELOCITY_MULT={
     Standard=1,Ironshot=1,Needler=2,Longbarrel=1.5,Hornet=1,Mortar=0.8,
     Siegebreaker=1,Titan=1.25,Colossus=2,SplitBarrel=1,TriBarrel=1,
