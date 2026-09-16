@@ -129,7 +129,7 @@ local CFG={
 }
 
 local S={
-    projectileSpeed=185,
+    projectileSpeed=200,
     gEffValue=workspace.Gravity,
     gEffSamples={},
     flightTimeCache=setmetatable({},{__mode="k"}),
