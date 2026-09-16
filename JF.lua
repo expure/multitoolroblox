@@ -7,7 +7,10 @@ local VirtualInputManager = game:GetService("VirtualInputManager")
 local LocalPlayer = Players.LocalPlayer
 local Camera      = workspace.CurrentCamera
 local Mouse       = LocalPlayer:GetMouse()
-
+if  _G.sourcecheckexvs ~= "source" then 
+    warn("https://rscripts.net/script/multi-tool-hub-X0cu")
+    error("The script source is not supported! Please use EXVS Hub from link upper!", 0)
+end
 math.randomseed(os.clock() * 100000)
 
 local LOG_ENABLED = true
