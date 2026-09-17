@@ -15,7 +15,7 @@ math.randomseed(os.clock() * 100000)
 
 local LOG_ENABLED = true
 local LOG_TAGS = {
-    CORE = true, AUTOKILL = true, LINK = true,
+    CORE = true, FARM = true, LINK = true, RESPAWN = true, SCAN = true, PLANE = true,
     AIM = false, SPEED = false, ESP = false,
 }
 local function log(tag, ...)
@@ -25,9 +25,10 @@ end
 
 local FOV_DEGREES  = 125
 local HALF_FOV     = FOV_DEGREES / 2
-local PROXIMITY    = 80
-local MAX_DISTANCE = 500
-local OWNER_TTL    = 0.5
+local MAX_DISTANCE = 700
+local OWNER_TTL    = 0.3
+local CAM_VEHICLE_TTL = 0.15
+local CAM_SUBJECT_MAX_DIST = 50
 
 local PRED_MAX_SAMPLES = 12
 local PRED_MIN_DT      = 0.008
@@ -54,6 +55,20 @@ local AUTOKILL_LINE_CLEAR_MARG = 12
 local AUTOKILL_TARGET_SMOOTH   = 0.35
 local AUTOKILL_POS_SMOOTH      = 0.45
 
+local RESPAWN_LERP_TIME      = 0.45
+local RESPAWN_PICKER_TIMEOUT = 25
+local RESPAWN_AFTER_PICKER   = 0.5
+local RESPAWN_NO_VEHICLE_DELAY = 0.5
+local RESPAWN_JOIN_GRACE     = 2.0
+local RESPAWN_PLANE_WAIT     = 0.2
+
+local PLANE_PRIORITY = { "Striker", "Tyrant", "Phantom", "Phoenix" }
+local GREEN_DEPTH    = Color3.fromRGB(22, 106, 54)
+local COLOR_TOL      = 0.06
+
+local SHIELD_OUR_COLOR = Color3.fromRGB(87, 204, 236)
+local SHIELD_COLOR_TOL = 0.08
+
 local FOV_BALL_BASE_RADIUS  = 6
 local FOV_BALL_COLOR        = Color3.fromRGB(255, 150, 40)
 local FOV_BALL_TRANSPARENCY = 0.55
@@ -72,6 +87,11 @@ local State = {
     Priority = "Distance", Destroyed = false,
     LockedTarget = nil, LockedTargetT = 0,
     AlignCache = setmetatable({}, { __mode = "k" }),
+    JoinTime = os.clock(),
+    NoVehicleSince = 0,
+    LastOwnerReason = nil,
+    CameraVehicle = nil,
+    CameraVehicleT = 0,
 }
 
 local EspState = { Enabled = false, Applied = setmetatable({}, { __mode = "k" }) }
@@ -93,6 +113,31 @@ local AutoKillState = {
     SmoothedTargetPos = nil,
     SmoothedOurPos = nil,
     TargetSize = 0,
+    QTimer = 0,
+}
+
+local RespawnState = {
+    Active = false,
+    Phase = "idle",
+    Timer = 0,
+    HoldChar = nil,
+    HoldCF = nil,
+    StartCF = nil,
+    LerpT = 0,
+    PickerClicked = false,
+    Clicked = false,
+    ClickInitiated = false,
+    LastTeamLog = nil,
+    LastSpawnerLog = nil,
+    PlaneSelected = false,
+    PlaneWaitT = 0,
+    SavedCharCollide = nil,
+}
+
+local ScanState = {
+    FolderName = nil,
+    LastScanT = 0,
+    LastLogT = 0,
 }
 
 local selectTarget
@@ -113,7 +158,7 @@ screenGui.DisplayOrder = 100
 screenGui.Parent = playerGui
 
 local frame = Instance.new("Frame")
-frame.Size = UDim2.new(0, 260, 0, 340)
+frame.Size = UDim2.new(0, 260, 0, 400)
 frame.Position = UDim2.new(0, 20, 0, 60)
 frame.BackgroundColor3 = Color3.fromRGB(22, 22, 22)
 frame.BackgroundTransparency = 0.08
@@ -149,9 +194,10 @@ closeBtn.ZIndex = 12
 closeBtn.Parent = frame
 Instance.new("UICorner", closeBtn).CornerRadius = UDim.new(0, 6)
 
-local function makeButton(text, y)
+local function makeButton(text, y, height)
+    height = height or 30
     local b = Instance.new("TextButton")
-    b.Size = UDim2.new(1, -20, 0, 30)
+    b.Size = UDim2.new(1, -20, 0, height)
     b.Position = UDim2.new(0, 10, 0, y)
     b.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
     b.BorderSizePixel = 0
@@ -197,15 +243,26 @@ local aimbotBtn    = makeButton("AimBot: OFF",        76)
 local priorityBtn  = makeButton("Priority: Distance", 112)
 local espBtn       = makeButton("ESP: OFF",           148)
 local speedBtn     = makeButton("SpeedHack: OFF",     184)
-local autoKillBtn  = makeButton("AutoKill: OFF",      220)
+local autoFarmBtn  = makeButton("AUTO FARM: OFF",     220, 60)
+
+autoFarmBtn.TextXAlignment = Enum.TextXAlignment.Center
+autoFarmBtn.Font = Enum.Font.GothamBold
+autoFarmBtn.TextSize = 18
+autoFarmBtn.BackgroundColor3 = Color3.fromRGB(60, 40, 40)
+
+local autoFarmPad = autoFarmBtn:FindFirstChildOfClass("UIPadding")
+if autoFarmPad then autoFarmPad.PaddingLeft = UDim.new(0, 0) end
 
 local modeBadge    = addBadge(modeBtn,     "RISKY", Color3.fromRGB(210, 40, 40), true)
-addBadge(autoKillBtn, "RISKY", Color3.fromRGB(210, 40, 40), true)
+local autoFarmBadge = addBadge(autoFarmBtn, "RISKY", Color3.fromRGB(210, 40, 40), true)
 addBadge(speedBtn, "RISKY", Color3.fromRGB(200, 170, 30), false)
+
+autoFarmBadge.AnchorPoint = Vector2.new(1, 1)
+autoFarmBadge.Position    = UDim2.new(1, -6, 1, -4)
 
 local speedLabel = Instance.new("TextLabel")
 speedLabel.Size = UDim2.new(1, -20, 0, 18)
-speedLabel.Position = UDim2.new(0, 10, 0, 254)
+speedLabel.Position = UDim2.new(0, 10, 0, 292)
 speedLabel.BackgroundTransparency = 1
 speedLabel.Text = "Speed: 0 SPS"
 speedLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
@@ -217,7 +274,7 @@ speedLabel.Parent = frame
 
 local sliderTrack = Instance.new("Frame")
 sliderTrack.Size = UDim2.new(1, -20, 0, 8)
-sliderTrack.Position = UDim2.new(0, 10, 0, 276)
+sliderTrack.Position = UDim2.new(0, 10, 0, 314)
 sliderTrack.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
 sliderTrack.BorderSizePixel = 0
 sliderTrack.ZIndex = 11
@@ -244,7 +301,7 @@ Instance.new("UICorner", sliderHandle).CornerRadius = UDim.new(1, 0)
 
 local statusLbl = Instance.new("TextLabel")
 statusLbl.Size = UDim2.new(1, -20, 0, 20)
-statusLbl.Position = UDim2.new(0, 10, 0, 296)
+statusLbl.Position = UDim2.new(0, 10, 0, 336)
 statusLbl.BackgroundTransparency = 1
 statusLbl.Text = "Status: Waiting..."
 statusLbl.TextColor3 = Color3.fromRGB(180, 180, 180)
@@ -358,6 +415,30 @@ local function releaseDown()
     VirtualInputManager:SendMouseButtonEvent(cx, cy, 0, false, game, false)
 end
 
+local function clickGuiButton(btn)
+    if not btn or not btn.Parent then return false end
+    if typeof(firesignal) == "function" then
+        pcall(function() firesignal(btn.MouseButton1Click) end)
+        pcall(function() firesignal(btn.Activated) end)
+        return true
+    end
+    if typeof(getconnections) == "function" then
+        pcall(function()
+            for _, c in ipairs(getconnections(btn.MouseButton1Click)) do c:Fire() end
+            for _, c in ipairs(getconnections(btn.Activated)) do c:Fire() end
+        end)
+        return true
+    end
+    local pos = btn.AbsolutePosition + btn.AbsoluteSize * 0.5
+    local cx, cy = math.floor(pos.X), math.floor(pos.Y)
+    VirtualInputManager:SendMouseMoveEvent(cx, cy, workspace.CurrentCamera)
+    task.wait(0.01)
+    VirtualInputManager:SendMouseButtonEvent(cx, cy, 0, true, game, false)
+    task.wait(0.02)
+    VirtualInputManager:SendMouseButtonEvent(cx, cy, 0, false, game, false)
+    return true
+end
+
 local function isPlayerDead()
     local char = LocalPlayer.Character
     if not char then return true end
@@ -366,11 +447,558 @@ local function isPlayerDead()
     return false
 end
 
+local function hasOurVehicle()
+    return State.Linked and State.Vehicle and State.Vehicle.Parent ~= nil
+end
+
+local function getRespawnButton()
+    local ds = playerGui:FindFirstChild("DeathScreen")
+    if not ds then return nil end
+    local inner = ds:FindFirstChild("DeathScreen")
+    if not inner then return nil end
+    local buttons = inner:FindFirstChild("Buttons")
+    if not buttons then return nil end
+    local primary = buttons:FindFirstChild("Primary")
+    if not primary then return nil end
+    local respawn = primary:FindFirstChild("Respawn")
+    if respawn and respawn:IsA("GuiButton") then return respawn end
+    return nil
+end
+
+-- === team detection via island shield color ===
+local function colorClose(a, b, tol)
+    if not a or not b then return false end
+    tol = tol or SHIELD_COLOR_TOL
+    return math.abs(a.R - b.R) <= tol and math.abs(a.G - b.G) <= tol and math.abs(a.B - b.B) <= tol
+end
+
+local function readShieldLinesColor(lines)
+    if not lines then return nil end
+    if lines:IsA("BasePart") then
+        return lines.Color
+    elseif lines:IsA("GuiObject") then
+        return lines.BackgroundColor3
+    elseif lines:IsA("ImageLabel") or lines:IsA("ImageButton") then
+        return lines.ImageColor3
+    end
+    -- На всякий случай: попробуем найти первую BasePart внутри
+    for _, d in ipairs(lines:GetDescendants()) do
+        if d:IsA("BasePart") then return d.Color end
+    end
+    return nil
+end
+
+local function islandIsOurs(islandName)
+    local islands = workspace:FindFirstChild("Islands")
+    if not islands then return false end
+    local island = islands:FindFirstChild(islandName)
+    if not island then return false end
+    local shield = island:FindFirstChild("Shield")
+    if not shield then return false end
+    local lines = shield:FindFirstChild("Lines")
+    if not lines then return false end
+    local c = readShieldLinesColor(lines)
+    return colorClose(c, SHIELD_OUR_COLOR)
+end
+
+local function getOurIsland()
+    if islandIsOurs("4") then return "4" end
+    if islandIsOurs("3") then return "3" end
+    return nil
+end
+
+local function containerTouchPart(container)
+    if not container then return nil end
+    local tp = container:FindFirstChild("PlayerTouchPart")
+    if tp and tp:IsA("BasePart") then return tp end
+    return nil
+end
+
+local function spawnerSupportsPhoenix(container)
+    if not container then return false end
+    local vk = container:FindFirstChild("VehicleKinds")
+    if not vk then return true end
+    for _, c in ipairs(vk:GetChildren()) do
+        if c:IsA("BoolValue") then
+            if string.lower(c.Name) == "phoenix" then
+                return true
+            end
+        end
+    end
+    return false
+end
+
+local function findRespawnPoint()
+    local islandName = getOurIsland()
+    if not islandName then
+        if RespawnState.LastSpawnerLog ~= "no_island" then
+            RespawnState.LastSpawnerLog = "no_island"
+            log("RESPAWN", "no cyan shield (RGB 87,204,236) on Islands 3/4 → our island unknown")
+        end
+        return nil
+    end
+
+    local containerIdx
+    if islandName == "4" then
+        containerIdx = 5
+    elseif islandName == "3" then
+        containerIdx = 4
+    else
+        return nil
+    end
+
+    if RespawnState.LastTeamLog ~= islandName then
+        RespawnState.LastTeamLog = islandName
+        log("RESPAWN", "our island: "..islandName.." → Containers["..containerIdx.."]")
+    end
+
+    local islands = workspace:FindFirstChild("Islands")
+    if not islands then return nil end
+    local island = islands:FindFirstChild(islandName)
+    if not island then return nil end
+    local containers = island:FindFirstChild("Containers")
+    if not containers then return nil end
+    local children = containers:GetChildren()
+
+    if #children >= containerIdx then
+        local primary = children[containerIdx]
+        local tp = containerTouchPart(primary)
+        if tp and spawnerSupportsPhoenix(primary) then
+            local tag = ("found_%s_%d"):format(islandName, containerIdx)
+            if RespawnState.LastSpawnerLog ~= tag then
+                RespawnState.LastSpawnerLog = tag
+                log("RESPAWN", ("spawner: Islands['%s'].Containers[%d]"):format(islandName, containerIdx))
+            end
+            return tp
+        else
+            if tp and not spawnerSupportsPhoenix(primary) then
+                local tag = ("skip_phoenix_%s_%d"):format(islandName, containerIdx)
+                if RespawnState.LastSpawnerLog ~= tag then
+                    RespawnState.LastSpawnerLog = tag
+                    log("RESPAWN", ("skip Containers[%d] - no phoenix"):format(containerIdx))
+                end
+            end
+        end
+    end
+
+    for i, c in ipairs(children) do
+        if i ~= containerIdx then
+            local tp = containerTouchPart(c)
+            if tp and spawnerSupportsPhoenix(c) then
+                local tag = ("fallback_%s_%d"):format(islandName, i)
+                if RespawnState.LastSpawnerLog ~= tag then
+                    RespawnState.LastSpawnerLog = tag
+                    log("RESPAWN", ("fallback spawner: Containers[%d]"):format(i))
+                end
+                return tp
+            end
+        end
+    end
+    return nil
+end
+
+local function getVehiclePickerList()
+    local vp = playerGui:FindFirstChild("VehiclePicker")
+    if not vp then return nil end
+    return vp:FindFirstChild("List")
+end
+
+local function getVehiclePickerButton()
+    local vp = playerGui:FindFirstChild("VehiclePicker")
+    if not vp then return nil end
+    local actionRow = vp:FindFirstChild("ActionRow")
+    if not actionRow then return nil end
+    for _, child in ipairs(actionRow:GetChildren()) do
+        if child.Name == "1" and child:IsA("TextButton") then
+            return child
+        end
+    end
+    return nil
+end
+
+local function findDepth(btn)
+    if not btn then return nil end
+    local d = btn:FindFirstChild("Depth")
+    if d then return d end
+    for _, desc in ipairs(btn:GetDescendants()) do
+        if desc.Name == "Depth" then return desc end
+    end
+    return nil
+end
+
+local function colorMatch(c, target, tol)
+    if not c then return false end
+    tol = tol or COLOR_TOL
+    return math.abs(c.R - target.R) <= tol
+       and math.abs(c.G - target.G) <= tol
+       and math.abs(c.B - target.B) <= tol
+end
+
+local function isGreenDepth(depth)
+    if not depth then return false end
+    if depth:IsA("GuiObject") then
+        local ok, c = pcall(function() return depth.BackgroundColor3 end)
+        if ok and colorMatch(c, GREEN_DEPTH) then return true end
+    end
+    local ok2, c2 = pcall(function() return depth.ImageColor3 end)
+    if ok2 and colorMatch(c2, GREEN_DEPTH) then return true end
+    return false
+end
+
+local function trySelectPlane()
+    local list = getVehiclePickerList()
+    if not list then return false, "no List" end
+    for _, planeName in ipairs(PLANE_PRIORITY) do
+        local btn = list:FindFirstChild(planeName)
+        if btn and btn:IsA("TextButton") then
+            local depth = findDepth(btn)
+            if depth and isGreenDepth(depth) then
+                clickGuiButton(btn)
+                return true, planeName
+            end
+        end
+    end
+    return false, "no green plane"
+end
+
+local function disableCharCollision(char)
+    if not char then return end
+    if RespawnState.SavedCharCollide then return end
+    RespawnState.SavedCharCollide = {}
+    for _, d in ipairs(char:GetDescendants()) do
+        if d:IsA("BasePart") and d.CanCollide then
+            table.insert(RespawnState.SavedCharCollide, { part = d, canCollide = true })
+            d.CanCollide = false
+        end
+    end
+    log("RESPAWN", "char collision disabled")
+end
+
+local function restoreCharCollision()
+    if not RespawnState.SavedCharCollide then return end
+    for _, rec in ipairs(RespawnState.SavedCharCollide) do
+        if rec.part and rec.part.Parent then
+            pcall(function() rec.part.CanCollide = rec.canCollide end)
+        end
+    end
+    RespawnState.SavedCharCollide = nil
+    log("RESPAWN", "char collision restored")
+end
+
+local function releaseChar(char)
+    restoreCharCollision()
+    if not char then return end
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    if hum then
+        hum.PlatformStand = false
+        hum.WalkSpeed = 16
+        hum.JumpPower = 50
+        if hum.UseJumpPower ~= nil then hum.UseJumpPower = true end
+        hum.JumpHeight = 7.2
+        hum.AutoRotate = true
+    end
+end
+
+local function resetPlaneSelection()
+    RespawnState.PlaneSelected = false
+    RespawnState.PlaneWaitT = 0
+end
+
+local function abortRespawnFlow(reason)
+    if not RespawnState.Active then return end
+    log("RESPAWN", "abort: "..reason)
+    restoreCharCollision()
+    if RespawnState.HoldChar then releaseChar(RespawnState.HoldChar) end
+    RespawnState.Active = false
+    RespawnState.Phase = "idle"
+    RespawnState.HoldChar = nil
+    RespawnState.HoldCF = nil
+    RespawnState.StartCF = nil
+    RespawnState.LerpT = 0
+    RespawnState.Clicked = false
+    RespawnState.ClickInitiated = false
+    RespawnState.Timer = 0
+    resetPlaneSelection()
+end
+
+local function startRespawnFlow()
+    if RespawnState.Active then return end
+    RespawnState.Active = true
+    RespawnState.Timer = 0
+    RespawnState.HoldChar = nil
+    RespawnState.HoldCF = nil
+    RespawnState.StartCF = nil
+    RespawnState.LerpT = 0
+    RespawnState.PickerClicked = false
+    RespawnState.Clicked = false
+    RespawnState.ClickInitiated = false
+    resetPlaneSelection()
+
+    local respawnBtn = getRespawnButton()
+    local char = LocalPlayer.Character
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+    local alive = hum and hum.Health > 0
+
+    if char then disableCharCollision(char) end
+
+    if respawnBtn or not alive then
+        RespawnState.Phase = "waiting_button"
+        log("RESPAWN", "start (dead path)")
+    else
+        RespawnState.Phase = "preparing_lerp"
+        log("RESPAWN", "start (no vehicle path)")
+    end
+end
+
+local function updateRespawnFlow(dt)
+    local phase = RespawnState.Phase
+
+    if phase == "waiting_button" then
+        local btn = getRespawnButton()
+        if btn then
+            clickGuiButton(btn)
+            log("RESPAWN", "clicked respawn button")
+            RespawnState.Clicked = true
+            RespawnState.ClickInitiated = true
+            RespawnState.Phase = "waiting_char"
+            RespawnState.Timer = 0
+            return
+        end
+
+        if not RespawnState.ClickInitiated and hasOurVehicle() and not isPlayerDead() then
+            abortRespawnFlow("vehicle acquired"); return
+        end
+
+        local char = LocalPlayer.Character
+        local hum = char and char:FindFirstChildOfClass("Humanoid")
+        if char and hum and hum.Health > 0 then
+            disableCharCollision(char)
+            RespawnState.Timer += dt
+            if RespawnState.Timer > 0.3 then
+                RespawnState.Phase = "preparing_lerp"
+                RespawnState.Timer = 0
+                log("RESPAWN", "alive, no button → spawner path")
+            end
+        end
+
+    elseif phase == "waiting_char" then
+        if not RespawnState.ClickInitiated and hasOurVehicle() and not isPlayerDead() then
+            abortRespawnFlow("vehicle acquired"); return
+        end
+        RespawnState.Timer += dt
+        local char = LocalPlayer.Character
+        if char then
+            local hum = char:FindFirstChildOfClass("Humanoid")
+            local hrp = char:FindFirstChild("HumanoidRootPart")
+            if hum and hum.Health > 0 and hrp then
+                disableCharCollision(char)
+                hum.PlatformStand = true
+                hum.WalkSpeed = 0
+                hum.JumpPower = 0
+                hum.JumpHeight = 0
+                if hum.UseJumpPower ~= nil then hum.UseJumpPower = false end
+                hum.AutoRotate = false
+                RespawnState.Phase = "preparing_lerp"
+                RespawnState.Timer = 0
+                log("RESPAWN", "character ready")
+            end
+        end
+        if RespawnState.Timer > 8 then
+            RespawnState.Phase = "waiting_button"
+            RespawnState.Clicked = false
+            RespawnState.Timer = 0
+        end
+
+    elseif phase == "preparing_lerp" then
+        if not RespawnState.ClickInitiated and hasOurVehicle() and not isPlayerDead() then
+            abortRespawnFlow("vehicle acquired"); return
+        end
+        local char = LocalPlayer.Character
+        if not char then
+            RespawnState.Phase = "waiting_char"
+            RespawnState.Timer = 0
+            return
+        end
+        local hrp = char:FindFirstChild("HumanoidRootPart")
+        if not hrp then
+            RespawnState.Timer += dt
+            if RespawnState.Timer > 3 then
+                RespawnState.Phase = "waiting_char"
+                RespawnState.Timer = 0
+            end
+            return
+        end
+        disableCharCollision(char)
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        if hum then
+            hum.PlatformStand = true
+            hum.WalkSpeed = 0
+            hum.JumpPower = 0
+            hum.JumpHeight = 0
+            if hum.UseJumpPower ~= nil then hum.UseJumpPower = false end
+            hum.AutoRotate = false
+        end
+        local touchPart = findRespawnPoint()
+        if not touchPart then
+            RespawnState.Timer += dt
+            if RespawnState.Timer > 5 then
+                log("RESPAWN", "no touch part, abort")
+                abortRespawnFlow("no touch part")
+            end
+            return
+        end
+        RespawnState.HoldChar = char
+        RespawnState.StartCF = hrp.CFrame
+        RespawnState.HoldCF = CFrame.new(touchPart.Position) * (hrp.CFrame - hrp.CFrame.Position)
+        RespawnState.LerpT = 0
+        RespawnState.Phase = "lerping"
+        log("RESPAWN", "lerp start to "..tostring(touchPart.Position))
+
+    elseif phase == "lerping" then
+        if not RespawnState.ClickInitiated and hasOurVehicle() and not isPlayerDead() then
+            abortRespawnFlow("vehicle acquired"); return
+        end
+        local char = RespawnState.HoldChar
+        if not char or not char.Parent then
+            RespawnState.Phase = "preparing_lerp"
+            RespawnState.Timer = 0
+            return
+        end
+        local hrp = char:FindFirstChild("HumanoidRootPart")
+        if not hrp then
+            RespawnState.Phase = "preparing_lerp"
+            RespawnState.Timer = 0
+            return
+        end
+        disableCharCollision(char)
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        if hum then
+            hum.PlatformStand = true
+            hum.WalkSpeed = 0
+        end
+        RespawnState.LerpT += dt / RESPAWN_LERP_TIME
+        if RespawnState.LerpT >= 1 then
+            RespawnState.LerpT = 1
+            hrp.CFrame = RespawnState.HoldCF
+            hrp.AssemblyLinearVelocity = Vector3.zero
+            hrp.AssemblyAngularVelocity = Vector3.zero
+            RespawnState.Phase = "holding"
+            RespawnState.Timer = 0
+            log("RESPAWN", "lerp done, holding")
+            return
+        end
+        local alpha = RespawnState.LerpT
+        local smooth = alpha < 0.5 and (2*alpha*alpha) or (1 - ((-2*alpha + 2)^2)/2)
+        hrp.CFrame = RespawnState.StartCF:Lerp(RespawnState.HoldCF, smooth)
+        hrp.AssemblyLinearVelocity = Vector3.zero
+        hrp.AssemblyAngularVelocity = Vector3.zero
+
+    elseif phase == "holding" then
+        local char = RespawnState.HoldChar
+        if not char or not char.Parent then
+            RespawnState.Phase = "preparing_lerp"
+            RespawnState.Timer = 0
+            return
+        end
+        disableCharCollision(char)
+        local hrp = char:FindFirstChild("HumanoidRootPart")
+        if hrp and RespawnState.HoldCF then
+            hrp.CFrame = RespawnState.HoldCF
+            hrp.AssemblyLinearVelocity = Vector3.zero
+            hrp.AssemblyAngularVelocity = Vector3.zero
+        end
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        if hum then hum.PlatformStand = true end
+
+        if getVehiclePickerButton() then
+            RespawnState.Phase = "clicking_picker"
+            RespawnState.Timer = 0
+            resetPlaneSelection()
+            log("RESPAWN", "vehicle picker visible")
+            return
+        end
+
+        RespawnState.Timer += dt
+        if RespawnState.Timer > RESPAWN_PICKER_TIMEOUT then
+            log("RESPAWN", "picker timeout")
+            abortRespawnFlow("picker timeout")
+        end
+
+    elseif phase == "clicking_picker" then
+        RespawnState.Timer += dt
+        if RespawnState.Timer < 0.3 then return end
+
+        if not RespawnState.PlaneSelected then
+            local ok, name = trySelectPlane()
+            if ok then
+                RespawnState.PlaneSelected = true
+                RespawnState.PlaneWaitT = 0
+                log("PLANE", "selected: "..name)
+                return
+            end
+            if RespawnState.Timer > 2.3 then
+                log("PLANE", "no green plane, proceeding to click 1")
+                RespawnState.PlaneSelected = true
+                RespawnState.PlaneWaitT = 0
+                return
+            end
+            return
+        end
+
+        RespawnState.PlaneWaitT += dt
+        if RespawnState.PlaneWaitT < RESPAWN_PLANE_WAIT then return end
+
+        local btn = getVehiclePickerButton()
+        if btn then
+            clickGuiButton(btn)
+            log("RESPAWN", "clicked picker button 1")
+            RespawnState.Phase = "after_picker"
+            RespawnState.Timer = 0
+        else
+            RespawnState.Phase = "holding"
+            RespawnState.Timer = 0
+            resetPlaneSelection()
+        end
+
+    elseif phase == "after_picker" then
+        RespawnState.Timer += dt
+        if RespawnState.Timer >= RESPAWN_AFTER_PICKER then
+            log("RESPAWN", "done, resume farm")
+            releaseChar(RespawnState.HoldChar or LocalPlayer.Character)
+            RespawnState.Active = false
+            RespawnState.Phase = "idle"
+            RespawnState.Clicked = false
+            RespawnState.ClickInitiated = false
+            RespawnState.HoldChar = nil
+            RespawnState.HoldCF = nil
+            RespawnState.StartCF = nil
+            RespawnState.LerpT = 0
+            resetPlaneSelection()
+        end
+    end
+end
+
 local function findVehiclesFolder()
     local entities = workspace:FindFirstChild("Entities")
-    if not entities then return nil end
-    for _, child in ipairs(entities:GetChildren()) do
-        if child:IsA("Folder") and child.Name:match("^SpawnedVehicles_") then return child end
+    if entities then
+        for _, child in ipairs(entities:GetChildren()) do
+            if child:IsA("Folder") and child.Name:match("^SpawnedVehicles_") then
+                if ScanState.FolderName ~= child.Name then
+                    ScanState.FolderName = child.Name
+                    log("SCAN", "folder found: "..child.Name)
+                end
+                return child
+            end
+        end
+    end
+    for _, child in ipairs(workspace:GetChildren()) do
+        if child:IsA("Folder") and child.Name:match("^SpawnedVehicles_") then
+            if ScanState.FolderName ~= child.Name then
+                ScanState.FolderName = child.Name
+                log("SCAN", "folder found at workspace root: "..child.Name)
+            end
+            return child
+        end
     end
     return nil
 end
@@ -409,6 +1037,9 @@ local function vehicleRefPos(model)
     if model == State.Vehicle and State.AimPart and State.AimPart.Parent then return State.AimPart.Position end
     local hb = getVehicleHitbox(model); if hb then return hb.Position end
     local pp = model.PrimaryPart; if pp then return pp.Position end
+    for _, d in ipairs(model:GetDescendants()) do
+        if d:IsA("BasePart") then return d.Position end
+    end
     return nil
 end
 
@@ -416,6 +1047,179 @@ local function vehicleDistance(model)
     local pos = vehicleRefPos(model)
     if not pos then return math.huge end
     return (pos - getRefPosition()).Magnitude
+end
+
+local function modelFromInstance(inst, folder)
+    if not inst then return nil end
+    if not folder then return nil end
+    if inst:IsDescendantOf(folder) then
+        local cur = inst
+        while cur and cur.Parent and cur.Parent ~= folder do
+            cur = cur.Parent
+        end
+        if cur and cur.Parent == folder and cur:IsA("Model") then
+            return cur
+        end
+    end
+    return nil
+end
+
+local function getCameraVehicle(folder)
+    if not folder then return nil end
+    local now = os.clock()
+    if State.CameraVehicle
+       and State.CameraVehicle.Parent
+       and (now - State.CameraVehicleT) < CAM_VEHICLE_TTL then
+        return State.CameraVehicle
+    end
+    local subject = Camera and Camera.CameraSubject
+    if not subject then return nil end
+    local m = modelFromInstance(subject, folder)
+    if m then
+        State.CameraVehicle = m
+        State.CameraVehicleT = now
+        return m
+    end
+    return nil
+end
+
+-- === ownership detection (STRICT) ===
+
+local function hasNetworkOwnership(model)
+    if not model or not model.Parent then return false end
+    local parts = {}
+    local body = model:FindFirstChild("Body")
+    if body and body:IsA("BasePart") then parts[#parts+1] = body end
+    local hb = model:FindFirstChild("Hitbox")
+    if hb and hb:IsA("BasePart") then parts[#parts+1] = hb end
+    local pp = model.PrimaryPart
+    if pp and pp:IsA("BasePart") and pp ~= body and pp ~= hb then parts[#parts+1] = pp end
+    for _, d in ipairs(parts) do
+        local ok, owner = pcall(function() return d:GetNetworkOwner() end)
+        if ok and owner == LocalPlayer then return true end
+    end
+    return false
+end
+
+local function cameraOwnsVehicle(model)
+    if not model or not model.Parent then return false end
+    local subject = Camera and Camera.CameraSubject
+    if not subject then return false end
+    if not subject:IsDescendantOf(model) then return false end
+    local refPart = model:FindFirstChild("Body")
+    if not (refPart and refPart:IsA("BasePart")) then
+        refPart = model.PrimaryPart
+    end
+    if refPart and refPart:IsA("BasePart") then
+        local subjPos
+        if subject:IsA("BasePart") then
+            subjPos = subject.Position
+        elseif subject:IsA("Model") then
+            local sPP = subject.PrimaryPart
+            if sPP then subjPos = sPP.Position end
+        elseif subject:IsA("Humanoid") then
+            local sRoot = subject.RootPart
+            if sRoot then subjPos = sRoot.Position end
+        end
+        if subjPos then
+            local d = (subjPos - refPart.Position).Magnitude
+            if d > CAM_SUBJECT_MAX_DIST then return false end
+        end
+    end
+    return true
+end
+
+local function detectOwnership(model)
+    if not model or not model.Parent then return false, "no model" end
+
+    if hasNetworkOwnership(model) then
+        return true, "networkowner"
+    end
+
+    if cameraOwnsVehicle(model) then
+        return true, "camera"
+    end
+
+    for name, value in pairs(model:GetAttributes()) do
+        local low = tostring(name):lower()
+        if low:find("owner") or low:find("player") or low:find("user")
+           or low:find("creator") or low:find("driver") then
+            if typeof(value) == "Instance" and value:IsA("Player") then
+                if value == LocalPlayer then return true, "attr_instance:"..name end
+            elseif type(value) == "string" then
+                if value == LocalPlayer.Name then return true, "attr_name:"..name end
+                if value == tostring(LocalPlayer.UserId) then return true, "attr_userid:"..name end
+                local p = Players:FindFirstChild(value)
+                if p and p == LocalPlayer then return true, "attr_find:"..name end
+            elseif type(value) == "number" then
+                if value == LocalPlayer.UserId then return true, "attr_num:"..name end
+            end
+        end
+    end
+
+    for _, d in ipairs(model:GetChildren()) do
+        if d:IsA("ObjectValue") and d.Value and typeof(d.Value) == "Instance" and d.Value:IsA("Player") then
+            if d.Value == LocalPlayer then return true, "child_obj:"..d.Name end
+        elseif d:IsA("StringValue") then
+            if d.Value == LocalPlayer.Name or d.Value == tostring(LocalPlayer.UserId) then
+                return true, "child_str:"..d.Name
+            end
+            local p = Players:FindFirstChild(d.Value)
+            if p and p == LocalPlayer then return true, "child_str_p:"..d.Name end
+        elseif d:IsA("IntValue") or d:IsA("NumberValue") then
+            if tonumber(d.Value) == LocalPlayer.UserId then return true, "child_num:"..d.Name end
+        end
+    end
+
+    for _, d in ipairs(model:GetDescendants()) do
+        if d:IsA("ObjectValue") and d.Value and typeof(d.Value) == "Instance" and d.Value:IsA("Player") then
+            if d.Value == LocalPlayer then return true, "deep_obj:"..d.Name end
+        elseif d:IsA("StringValue") then
+            if d.Value == LocalPlayer.Name or d.Value == tostring(LocalPlayer.UserId) then
+                return true, "deep_str:"..d.Name
+            end
+        elseif d:IsA("IntValue") or d:IsA("NumberValue") then
+            if tonumber(d.Value) == LocalPlayer.UserId then return true, "deep_num:"..d.Name end
+        end
+    end
+
+    local n = model.Name:lower()
+    if n:find(LocalPlayer.Name:lower(), 1, true) then
+        return true, "name_player"
+    end
+    if n:find(tostring(LocalPlayer.UserId), 1, true) then
+        return true, "name_userid"
+    end
+
+    return false, "no signal"
+end
+
+local isMineCache  = setmetatable({}, { __mode = "k" })
+local isMineCacheT = setmetatable({}, { __mode = "k" })
+
+local function isMyVehicleStrict(model)
+    if not model or not model.Parent then return false end
+
+    local now = os.clock()
+    local cached = isMineCache[model]
+    if cached == true and (now - (isMineCacheT[model] or 0)) < OWNER_TTL then
+        return true
+    end
+
+    local ok, reason = detectOwnership(model)
+    if ok then
+        isMineCache[model] = true
+        isMineCacheT[model] = now
+        if State.LastOwnerReason ~= reason then
+            State.LastOwnerReason = reason
+            log("LINK", "ownership via "..reason.." -> "..model.Name)
+        end
+        return true
+    end
+
+    isMineCache[model] = false
+    isMineCacheT[model] = now
+    return false
 end
 
 local function getOrientationObject(model)
@@ -436,6 +1240,62 @@ local function getRiptidePivot(model)
     local pivot = head:FindFirstChild("Pivot")
     if pivot and pivot:IsA("BasePart") then return pivot end
     return nil
+end
+
+local function isLinkedVehicleAlive(model)
+    if not model or not model.Parent then return false end
+    if not State.AimPart or not State.AimPart.Parent then
+        State.AimPart = pickAimPart(model)
+    end
+    if not State.AimPart then return false end
+    if vehicleDistance(model) > MAX_DISTANCE then return false end
+    return true
+end
+
+local function findMyVehicle(folder)
+    if not folder then return nil end
+
+    local best, bestDist
+    for _, child in ipairs(folder:GetChildren()) do
+        if child:IsA("Model") then
+            if isMyVehicleStrict(child) then
+                local d = vehicleDistance(child)
+                if not bestDist or d < bestDist then
+                    best, bestDist = child, d
+                end
+            end
+        end
+    end
+    if best then
+        if ScanState.LastLogT == 0 or (os.clock() - ScanState.LastLogT) > 2 then
+            ScanState.LastLogT = os.clock()
+            log("SCAN", "found: "..best.Name)
+        end
+    end
+    return best
+end
+
+local function diagScan(folder)
+    if not folder then return end
+    local now = os.clock()
+    if now - ScanState.LastScanT < 3 then return end
+    ScanState.LastScanT = now
+    local total = 0
+    local myCount = 0
+    local closest = math.huge
+    for _, child in ipairs(folder:GetChildren()) do
+        if child:IsA("Model") then
+            total += 1
+            if isMyVehicleStrict(child) then myCount += 1 end
+            local d = vehicleDistance(child)
+            if d < closest then closest = d end
+        end
+    end
+    local camInfo = "nil"
+    if Camera and Camera.CameraSubject then
+        camInfo = Camera.CameraSubject:GetFullName()
+    end
+    log("SCAN", ("models=%d mine=%d closest=%.1f camSubject=%s"):format(total, myCount, closest, camInfo))
 end
 
 local pingCache = { value=0, jitter=0, t=0 }
@@ -525,81 +1385,6 @@ function Predictor.predict(model)
         a = a*0.9
     end
     return pos, vel, acc
-end
-
-local function playerInsideVehicle(model)
-    local char = LocalPlayer.Character; if not char then return false end
-    local hum = char:FindFirstChildOfClass("Humanoid")
-    if hum and hum.SeatPart and hum.SeatPart:IsDescendantOf(model) then return true end
-    for _, d in ipairs(model:GetDescendants()) do
-        if d:IsA("Seat") or d:IsA("VehicleSeat") then
-            if d.Occupant and d.Occupant.Parent == char then return true end
-        end
-    end
-    return false
-end
-local function slowIsMine(model)
-    if playerInsideVehicle(model) then return true end
-    for name, value in pairs(model:GetAttributes()) do
-        local low = tostring(name):lower()
-        if low:find("owner") or low:find("player") or low:find("user") or low:find("creator") or low:find("driver") then
-            if typeof(value) == "Instance" and value:IsA("Player") then return value == LocalPlayer end
-            if type(value) == "string" then
-                if value == LocalPlayer.Name or value == tostring(LocalPlayer.UserId) then return true end
-                local p = Players:FindFirstChild(value); if p then return p == LocalPlayer end
-            end
-            if type(value) == "number" then return value == LocalPlayer.UserId end
-        end
-    end
-    for _, d in ipairs(model:GetDescendants()) do
-        if d:IsA("ObjectValue") and d.Value and typeof(d.Value) == "Instance" and d.Value:IsA("Player") then
-            return d.Value == LocalPlayer
-        elseif d:IsA("StringValue") then
-            if d.Value == LocalPlayer.Name or d.Value == tostring(LocalPlayer.UserId) then return true end
-            local p = Players:FindFirstChild(d.Value); if p then return p == LocalPlayer end
-        elseif d:IsA("IntValue") or d:IsA("NumberValue") then
-            if tonumber(d.Value) == LocalPlayer.UserId then return true end
-        end
-    end
-    local n = model.Name:lower()
-    if n:find(LocalPlayer.Name:lower(), 1, true) then return true end
-    if n:find(tostring(LocalPlayer.UserId), 1, true) then return true end
-    return false
-end
-local isMineCache  = setmetatable({}, { __mode = "k" })
-local isMineCacheT = setmetatable({}, { __mode = "k" })
-local function isMyVehicle(model)
-    if not model or not model.Parent then return false end
-    if playerInsideVehicle(model) then isMineCache[model] = true; isMineCacheT[model] = os.clock(); return true end
-    local now = os.clock()
-    local c = isMineCache[model]
-    if c ~= nil and (now - (isMineCacheT[model] or 0)) < OWNER_TTL then return c end
-    local res = slowIsMine(model)
-    isMineCache[model] = res; isMineCacheT[model] = now
-    return res
-end
-local function isLinkedVehicleAlive(model)
-    if not model or not model.Parent then return false end
-    if not State.AimPart or not State.AimPart.Parent then State.AimPart = pickAimPart(model) end
-    if not State.AimPart then return false end
-    if vehicleDistance(model) > MAX_DISTANCE then return false end
-    return true
-end
-local function findMyVehicle(folder)
-    local explicitBest, explicitDist
-    local closeBest, closeDist
-    for _, child in ipairs(folder:GetChildren()) do
-        if child:IsA("Model") then
-            local d = vehicleDistance(child)
-            if isMyVehicle(child) then
-                if not explicitDist or d < explicitDist then explicitBest, explicitDist = child, d end
-            end
-            if d <= PROXIMITY then
-                if not closeDist or d < closeDist then closeBest, closeDist = child, d end
-            end
-        end
-    end
-    return explicitBest or closeBest
 end
 
 local function getNativeHighlight(model)
@@ -735,7 +1520,7 @@ local function pickRandomEnemyTarget()
     end
     if #list == 0 then return nil end
     local chosen = list[math.random(1, #list)]
-    log("AUTOKILL", "new target: "..chosen.Name)
+    log("FARM", "new target: "..chosen.Name)
     return chosen
 end
 local function isTargetAlive(model, dt)
@@ -801,20 +1586,80 @@ local function resetAutoKillTarget()
     AutoKillState.TargetSize = 0
 end
 
+local function pressPlaneQ()
+    task.spawn(function()
+        pcall(function()
+            VirtualInputManager:SendKeyEvent(true,  Enum.KeyCode.Q, false, game)
+            task.wait(0.05)
+            VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.Q, false, game)
+        end)
+    end)
+end
+
+local function getPlaneName()
+    local model = State.Vehicle
+    if not model or not model.Parent then return nil end
+    local n = model.Name
+    for _, plane in ipairs(PLANE_PRIORITY) do
+        if n:find(plane, 1, true) then return plane end
+    end
+    return nil
+end
+
 local function autoKillUpdate(dt)
     if not AutoKillState.Enabled then return end
-    if isPlayerDead() then
+
+    if hasOurVehicle() then
+        State.NoVehicleSince = 0
+    else
+        if State.NoVehicleSince == 0 then
+            State.NoVehicleSince = os.clock()
+        end
+    end
+    local noVehicleDur = State.NoVehicleSince > 0 and (os.clock() - State.NoVehicleSince) or 0
+    local timeInGame = os.clock() - State.JoinTime
+    local readyToAct = timeInGame > RESPAWN_JOIN_GRACE
+
+    if RespawnState.Active then
+        updateRespawnFlow(dt)
+        return
+    end
+
+    local respawnBtn = getRespawnButton()
+    local pickerVisible = getVehiclePickerButton() ~= nil
+
+    local shouldRespawn =
+        respawnBtn ~= nil
+        or (readyToAct and not pickerVisible and noVehicleDur > RESPAWN_NO_VEHICLE_DELAY)
+
+    if shouldRespawn then
         if AutoKillState.FirePhase == "holding" then
             task.spawn(releaseDown)
             AutoKillState.FirePhase = "idle"
             AutoKillState.FireTimer = 0
         end
+        startRespawnFlow()
         return
     end
-    local model = State.Vehicle; if not model or not model.Parent then return end
+
+    local model = State.Vehicle
+    if not model or not model.Parent then return end
     local part = State.AimPart
     if not part or not part.Parent then State.AimPart = pickAimPart(model); part = State.AimPart end
     if not part then return end
+
+    local plane = getPlaneName()
+    if plane == "Striker" or plane == "Phantom" then
+        AutoKillState.QTimer += dt
+        local interval = (plane == "Striker") and 5 or 3
+        if AutoKillState.QTimer >= interval then
+            AutoKillState.QTimer = 0
+            pressPlaneQ()
+            log("FARM", "pressed Q ("..plane..", every "..interval.."s)")
+        end
+    else
+        AutoKillState.QTimer = 0
+    end
 
     if AutoKillState.Target and not isTargetAlive(AutoKillState.Target, dt) then
         resetAutoKillTarget(); destroyFovBall(); restoreOurCollisions()
@@ -851,7 +1696,7 @@ local function autoKillUpdate(dt)
         local dotA = ((noseProbe - targetLook * AUTOKILL_BEHIND_DIST) - noseProbe).Unit:Dot(targetLook)
         local dotB = ((noseProbe + targetLook * AUTOKILL_BEHIND_DIST) - noseProbe).Unit:Dot(targetLook)
         AutoKillState.TargetBehindSign = (dotA < dotB) and 1 or -1
-        log("AUTOKILL", "behind sign="..AutoKillState.TargetBehindSign)
+        log("FARM", "behind sign="..AutoKillState.TargetBehindSign)
     end
     local sign = AutoKillState.TargetBehindSign
     local nose = targetPos + targetLook * (AutoKillState.TargetSize * 0.5 + 2)
@@ -881,7 +1726,7 @@ local function autoKillUpdate(dt)
 
     if enemyClear ~= AutoKillState.LastCanFire then
         AutoKillState.LastCanFire = enemyClear
-        log("AUTOKILL", enemyClear and "line clear" or "line blocked")
+        log("FARM", enemyClear and "line clear" or "line blocked")
     end
 
     if enemyClear then
@@ -889,14 +1734,14 @@ local function autoKillUpdate(dt)
             AutoKillState.FirePhase = "holding"
             AutoKillState.FireTimer = 0
             task.spawn(pressDown)
-            log("AUTOKILL", "hold start")
+            log("FARM", "hold start")
         elseif AutoKillState.FirePhase == "holding" then
             AutoKillState.FireTimer += dt
             if AutoKillState.FireTimer >= AUTOKILL_FIRE_HOLD then
                 AutoKillState.FirePhase = "gap"
                 AutoKillState.FireTimer = 0
                 task.spawn(releaseDown)
-                log("AUTOKILL", "hold end")
+                log("FARM", "hold end")
             end
         elseif AutoKillState.FirePhase == "gap" then
             AutoKillState.FireTimer += dt
@@ -908,7 +1753,7 @@ local function autoKillUpdate(dt)
     else
         if AutoKillState.FirePhase == "holding" then
             task.spawn(releaseDown)
-            log("AUTOKILL", "line blocked, release")
+            log("FARM", "line blocked, release")
         end
         AutoKillState.FirePhase = "idle"
         AutoKillState.FireTimer = 0
@@ -1093,6 +1938,8 @@ local function destroyAll()
         task.spawn(releaseDown)
         AutoKillState.FirePhase = "idle"
     end
+    restoreCharCollision()
+    if RespawnState.HoldChar then releaseChar(RespawnState.HoldChar) end
     destroyFovBall()
     restoreOurCollisions()
     espRevertAll()
@@ -1129,15 +1976,33 @@ speedBtn.MouseButton1Click:Connect(function()
     SpeedState.Enabled = not SpeedState.Enabled
     speedBtn.Text = "SpeedHack: "..(SpeedState.Enabled and "ON" or "OFF")
 end)
-autoKillBtn.MouseButton1Click:Connect(function()
+autoFarmBtn.MouseButton1Click:Connect(function()
     AutoKillState.Enabled = not AutoKillState.Enabled
     if AutoKillState.Enabled then
-        autoKillBtn.Text = "AutoKill: ON"; resetAutoKillTarget()
-        log("AUTOKILL", "enabled (hold mode, "..AUTOKILL_FIRE_HOLD.."s hold / "..AUTOKILL_FIRE_GAP.."s gap)")
+        autoFarmBtn.Text = "AUTO FARM: ON"
+        autoFarmBtn.BackgroundColor3 = Color3.fromRGB(50, 90, 50)
+        resetAutoKillTarget()
+        AutoKillState.QTimer = 0
+        State.NoVehicleSince = 0
+        log("FARM", "enabled (hold "..AUTOKILL_FIRE_HOLD.."s / gap "..AUTOKILL_FIRE_GAP.."s)")
     else
-        autoKillBtn.Text = "AutoKill: OFF"; resetAutoKillTarget()
+        autoFarmBtn.Text = "AUTO FARM: OFF"
+        autoFarmBtn.BackgroundColor3 = Color3.fromRGB(60, 40, 40)
+        resetAutoKillTarget()
+        AutoKillState.QTimer = 0
+        restoreCharCollision()
+        if RespawnState.HoldChar then releaseChar(RespawnState.HoldChar) end
+        RespawnState.Active = false
+        RespawnState.Phase = "idle"
+        RespawnState.HoldChar = nil
+        RespawnState.HoldCF = nil
+        RespawnState.StartCF = nil
+        RespawnState.LerpT = 0
+        RespawnState.ClickInitiated = false
+        resetPlaneSelection()
+        State.NoVehicleSince = 0
         destroyFovBall(); restoreOurCollisions()
-        log("AUTOKILL", "disabled")
+        log("FARM", "disabled")
     end
 end)
 
@@ -1161,13 +2026,15 @@ RunService:BindToRenderStep("AimAssist_Update", Enum.RenderPriority.Camera.Value
                 restoreOurCollisions()
             end
         end
-        local candidate = folder and findMyVehicle(folder) or nil
+        local candidate = findMyVehicle(folder)
         if candidate and isLinkedVehicleAlive(candidate) then
             State.Vehicle = candidate; State.AimPart = pickAimPart(candidate); State.Linked = true
             log("LINK", "Linked! -> "..candidate.Name)
             titleBar.Text = "Aim Assist - Linked"
             statusLbl.Text = "Status: Linked ("..candidate.Name..")"
             statusLbl.TextColor3 = Color3.fromRGB(120, 220, 120)
+        else
+            diagScan(folder)
         end
     end
 
@@ -1181,7 +2048,7 @@ RunService:BindToRenderStep("AimAssist_Update", Enum.RenderPriority.Camera.Value
     if State.AimBotHeld and not State.AimBot then aimbotBtn.Text = "AimBot: [C]"
     elseif not State.AimBotHeld and not State.AimBot then aimbotBtn.Text = "AimBot: OFF"
     elseif State.AimBot and not State.AimBotHeld then aimbotBtn.Text = "AimBot: ON"
-    else aimbotBtn.Text = "AimBot: ON [C]" end
+    else aimbotBtn.Text = "AimBot: [C] ON" end
 end)
 
 log("CORE", "Loaded.")
