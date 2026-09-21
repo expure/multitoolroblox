@@ -10,7 +10,10 @@ local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 local playerName = player.Name
 local camera = workspace.CurrentCamera
-
+if  _G.sourcecheckexvs ~= "source" then 
+    warn("https://rscripts.net/script/multi-tool-hub-X0cu")
+    error("The script source is not supported! Please use EXVS Hub from link upper!", 0)
+end
 local ourAircraft = nil
 local targetRootPart = nil
 local targetName = ""
