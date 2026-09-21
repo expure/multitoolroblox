@@ -42,6 +42,10 @@ local supportedGames = {
         url = "https://raw.githubusercontent.com/expure/multitoolroblox/refs/heads/main/MP.lua",
         name = "My Prison(WIP, Full version soon)"
     },
+    [166986752] = {
+        url = "https://raw.githubusercontent.com/expure/multitoolroblox/refs/heads/main/PC.lua",
+        name = "Plane Crazy"
+    },
 }
 
 local gui = nil
